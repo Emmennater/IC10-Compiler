@@ -6,10 +6,12 @@ import {
 import { javascript } from "@codemirror/lang-javascript";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { insertTab, indentLess, indentMore, history, historyKeymap, toggleComment } from "@codemirror/commands";
-import { parser } from "./parser.js";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
+import { parser } from "./parser.js";
 import { transpile } from "./transpiler.js";
+import { runTests } from "./tests.js";
+import { getAST } from "./helper.js";
 
 // const starterCode = `
 // let machine = d0
@@ -31,8 +33,9 @@ import { transpile } from "./transpiler.js";
 // `.substring(1);
 
 const starterCode = `
-let machine = d0
-`.substring(1);
+let x = 0
+let y = 0
+y = x + 3`.substring(1);
 
 const device = Tag.define();
 const register = Tag.define();
@@ -44,12 +47,14 @@ const myCustomTheme = EditorView.theme({
     backgroundColor: "#282C34",
     width: "100%",
     height: "100%",
-    padding: "0px"
+    padding: "0px",
+    fontSize: "24px",
   },
   // The main editor area
   ".cm-content, .cm-gutter": {
     minHeight: "200px",
     padding: "0px",
+    paddingBottom: "var(--scroll-padding)",
   },
   // The background area containing line numbers
   ".cm-gutters": {
@@ -57,7 +62,8 @@ const myCustomTheme = EditorView.theme({
     color: "#858585",
     border: "none",
     padding: "0px",
-    borderRight: "2px solid #535964"
+    borderRight: "2px solid #535964",
+    userSelect: "none",
   },
   // Line number gutter
   "& .cm-gutterElement": {
@@ -71,10 +77,19 @@ const myCustomTheme = EditorView.theme({
   "& .cm-activeLine": {
     backgroundColor: "#ffffff11"
   },
-  // Active line gutter
-  ".cm-activeLineGutter": {
+
+  "& .cm-activeLineGutter": {
     color: "#b7b7b7",
     backgroundColor: "#363b45"
+  },
+  // Hide active line
+  "&.cm-hide-active-line .cm-activeLine": {
+    backgroundColor: "transparent"
+  },
+
+  "&.cm-hide-active-line .cm-activeLineGutter": {
+    backgroundColor: "transparent",
+    color: "inherit"
   },
   // Caret color
   "&.cm-focused .cm-cursor": {
@@ -85,8 +100,16 @@ const myCustomTheme = EditorView.theme({
     backgroundColor: "#ffffff22"
   },
   // Selection color (unfocused)
-  "&.cm-selectionBackground": {
+  "& .cm-scroller > .cm-selectionLayer > .cm-selectionBackground": {
     backgroundColor: "#ffffff22"
+  },
+  // Scrollbar
+  ".cm-scroller::-webkit-scrollbar": {
+    width: "16px",
+    height: "12px"
+  },
+  ".cm-scroller::-webkit-scrollbar-thumb": {
+    backgroundColor: "#ffffff22",
   },
 }, { dark: true });
 
@@ -114,7 +137,7 @@ const lang = LRLanguage.define({
         Number: t.number,
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon": t.operator,
         "InstructionName FunctionName": t.function(t.variableName),
-        "if then elif else end let while do loop break continue": t.keyword,
+        "if then elif else end let while do loop break continue device": t.keyword,
         String: t.string,
         Device: device,
         Register: register,
@@ -185,12 +208,23 @@ const editor = new EditorView({
           // Copy the current line's indentation
           let indent = (line.text.match(/^\s*/) ?? [""])[0];
 
-          // If the line ends with "then" or "do", indent one more level
+          // If the line ends with "then", "do", or "else", indent one more level
           if (/\b(?:then|do|else)\s*$/.test(beforeCursor)) {
             indent += "  ";
           }
 
-          view.dispatch(state.replaceSelection("\n" + indent));
+          view.dispatch({
+            changes: {
+              from,
+              to: from,
+              insert: "\n" + indent
+            },
+            selection: {
+              anchor: from + 1 + indent.length
+            },
+            scrollIntoView: true
+          });
+
           return true;
         }
       },
@@ -224,27 +258,50 @@ const editor = new EditorView({
         key: "Mod-/",
         run: toggleComment
       }
-    ])
+    ]),
+    EditorView.updateListener.of(update => {
+      const view = update.view;
+
+      const margin = 5 * view.defaultLineHeight;
+
+      const pos = update.state.selection.main.head;
+      const coords = view.coordsAtPos(pos);
+      if (!coords) return;
+
+      const scroller = update.view.scrollDOM;
+      const rect = scroller.getBoundingClientRect();
+
+      if (coords.top < rect.top + margin) {
+        scroller.scrollTop -= (rect.top + margin) - coords.top;
+      }
+
+      if (coords.bottom > rect.bottom - margin) {
+        scroller.scrollTop += coords.bottom - (rect.bottom - margin);
+      }
+    }),
+    EditorView.updateListener.of(update => {
+      const view = update.view;
+
+      const hasSelection = !view.state.selection.main.empty;
+      const isFocused = view.hasFocus;
+
+      const hideActiveLine = hasSelection || !isFocused;
+
+      view.dom.classList.toggle("cm-hide-active-line", hideActiveLine);
+    })
   ]
 });
 
-function nodeToJSON(cursor) {
-  const result = {
-    type: cursor.type.name,
-    // from: cursor.from,
-    // to: cursor.to,
-    children: []
-  };
+const scroller = editor.scrollDOM;
 
-  if (cursor.firstChild()) {
-    do {
-      result.children.push(nodeToJSON(cursor));
-    } while (cursor.nextSibling());
-    cursor.parent();
-  }
+const resize = new ResizeObserver(() => {
+  scroller.style.setProperty(
+    "--scroll-padding",
+    `${scroller.clientHeight - editor.defaultLineHeight}px`
+  );
+});
 
-  return result;
-}
+resize.observe(scroller);
 
 function showTree(tree, text) {
   const getLineNum = pos => {
@@ -268,16 +325,17 @@ function showTree(tree, text) {
       );
     }
   });
-
-  const json = nodeToJSON(tree.cursor());
-  console.log(json);
 }
 
 function run() {
   const text = editor.state.doc.toString();
-  const tree = parser.parse(text);
-  // showTree(tree, text);
-  transpile(tree, text);
+  const ast = getAST(text);
+  const ic10 = transpile(ast);
+  console.log(ic10);
 }
 
 document.getElementById("run").addEventListener("click", run);
+
+// run();
+
+runTests(parser);

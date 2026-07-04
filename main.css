@@ -15,23 +15,6 @@ html, body {
   margin: 0;
 }
 
-.cm-editor {
-  font-size: 24px;
-}
-
-.cm-content {
-  display: flex;
-  font-family: "JetBrains Mono", monospace;
-  line-height: 1.4;
-  tab-size: 2;
-}
-
-.cm-gutters {
-  font-size: 22px;
-  padding-left: 10px;
-  user-select: none;
-}
-
 .main {
   margin: 20px;
   height: calc(100% - 40px);
@@ -46,7 +29,7 @@ html, body {
   width: calc(100% - 20px);
   height: 40px;
   align-items: center;
-  padding: 4px 10px;
+  padding: 4px 14px;
     background: var(--cyan-dimmer);
   border-bottom: solid 2px var(--cyan-dim);
   color: var(--cyan);
@@ -65,8 +48,7 @@ html, body {
   color: #d2a8ff;
 }
 
-.title .end {
-  font-weight: normal;
+.title .mid {
   color: #ff7b72;
 }
 
@@ -74,11 +56,19 @@ button {
   width: 100px;
   font-size: 24px;
   font-weight: bold;
-  background: #79c0ff11;
+  background: #79c0ff18;
   border: solid 2px #79c0ff88;
   border-radius: 8px;
   color: #79c0ff;
   cursor: pointer;
+}
+
+button:hover {
+  background: #79c0ff26;
+}
+
+button:active {
+  filter: brightness(0.8);
 }
 
 hbox {

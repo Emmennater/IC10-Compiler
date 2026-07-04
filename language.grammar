@@ -8,8 +8,8 @@ kwn<term> { @specialize[@name={term}]<identifier, term> }
 block { newline* ((statement (newline+ statement)*) newline*)? }
 
 statement {
-  Instruction | IfExpr | WhileExpr | LoopExpr | Declaration | Assignment | Label |
-  kwn<"break"> | kwn<"continue">
+  Instruction | IfExpr | WhileExpr | LoopExpr | Declaration | DeviceDeclaration |
+  Assignment | Label | kwn<"break"> | kwn<"continue">
 }
 
 Instruction { InstructionName expression* }
@@ -26,6 +26,8 @@ LoopExpr { kwn<"loop"> newline block kwn<"end"> }
 VariableName { identifier }
 
 Declaration { @specialize[@name="let"]<identifier, "let"> VariableName Assign expression }
+
+DeviceDeclaration { @specialize[@name="device"]<identifier, "device"> VariableName Assign Device }
 
 Assignment { Property Assign expression }
 
@@ -58,14 +60,14 @@ Device { kw<"d0"> | kw<"d1"> | kw<"d2"> | kw<"d3"> | kw<"d4"> | kw<"d5"> }
 Register {
   kw<"r0"> | kw<"r1"> | kw<"r2"> | kw<"r3"> | kw<"r4"> | kw<"r5"> | kw<"r6"> | kw<"r7"> |
   kw<"r8"> | kw<"r9"> | kw<"r10"> | kw<"r11"> | kw<"r12"> | kw<"r13"> | kw<"r14"> | kw<"r15"> |
-  kw<"r16"> | kw<"r17">
+  kw<"r16"> | kw<"r17"> | kw<"sp"> | kw<"ra">
 }
 
 Bool {
   kw<"true"> | kw<"false">
 }
 
-Property { (identifier | Register | Device) (Dot Property)? }
+Property { (VariableName | Register | Device) (Dot Property)? }
 
 @tokens {
   identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
