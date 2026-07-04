@@ -3,18 +3,22 @@
 kw<term> { @specialize<identifier, term> }
 kwn<term> { @specialize[@name={term}]<identifier, term> }
 
-@top Program { block }
+@top program { block }
 
-block { newline* (statement (newline+ statement)*) newline* }
+block { newline* ((statement (newline+ statement)*) newline*)? }
 
 statement { Instruction | IfExpr | WhileExpr | Declaration | Assignment | Label }
 
 Instruction { InstructionName expression* }
 
+If { kwn<"if"> expression kwn<"then"> newline block }
+ElseIf { kwn<"elseif"> expression kwn<"then"> newline block }
+Else { kwn<"else"> newline block }
+
 IfExpr {
-  kwn<"if"> expression kwn<"then"> newline block
-  (kwn<"elseif"> expression kwn<"then"> newline block)*
-  (kwn<"else"> newline block)?
+  If
+  ElseIf*
+  Else?
   kwn<"end">
 }
 

@@ -2,36 +2,10 @@
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { javascript } from "@codemirror/lang-javascript";
 import { acceptCompletion } from "@codemirror/autocomplete";
-import { insertTab, indentLess } from "@codemirror/commands";
+import { insertTab, indentLess, history, historyKeymap } from "@codemirror/commands";
 import { parser } from "./parser.js";
 import { LRLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
-
-// const starterCode = `
-// // Testing
-// define analyzer HASH("StructurePipeAnalyzer")
-// alias pump r0
-// let x = 1 + 1
-// if x == 2:
-//   s pump Setting 1
-// else:
-//   s pump Setting 2
-// `.substring(1);
-
-// const starterCode = `
-// define analyzer HASH("StructurePipeAnalyzer")
-// alias pump d0
-// let x = 1 + 1
-
-// if x == 2 then
-//   s pump Setting 1
-// elseif x == 3 then
-//   s pump Setting 2
-//   move r1 true
-// else
-//   s pump Setting 3
-// end
-// `.substring(1);
 
 const starterCode = `
 let machine = d0
@@ -53,7 +27,6 @@ end
 const device = Tag.define();
 const register = Tag.define();
 
-// 1. Define the structural layout and editor UI colors
 const myCustomTheme = EditorView.theme({
   // The main editor container
   "&": {
@@ -81,12 +54,11 @@ const myCustomTheme = EditorView.theme({
   ".cm-cursor, & .cm-dropCursor": {
     borderLeftColor: "#ffffff"
   }
-}, { dark: true }); // Use dark: false for a light theme
+}, { dark: true });
 
-// 2. Define the token colors for syntax highlighting
 const myHighlightStyle = HighlightStyle.define([
-  { tag: device, color: '#72ffec' },
-  { tag: register, color: '#72ffec' },
+  { tag: device, color: '#75e6d7' },
+  { tag: register, color: '#75e6d7' },
   { tag: t.keyword, color: "#ff7b72" },
   { tag: t.comment, color: "#8b949e" },
   { tag: [t.string, t.special(t.string)], color: "#a5d6ff" },
@@ -96,7 +68,6 @@ const myHighlightStyle = HighlightStyle.define([
   { tag: t.operator, color: "#7d91a8" },
 ]);
 
-// 3. Combine both parts into a single extension export
 const myCustomThemeExtension = [
   myCustomTheme,
   syntaxHighlighting(myHighlightStyle)
@@ -128,7 +99,9 @@ const editor = new EditorView({
     myCustomThemeExtension,
     lang,
     lineNumbers(),
+    history(),
     keymap.of([
+      ...historyKeymap,
       {
         key: "Tab",
         run(view) {
@@ -142,6 +115,27 @@ const editor = new EditorView({
       {
         key: "Shift-Tab",
         run: indentLess
+      },
+      {
+        key: "Enter",
+        run(view) {
+          const { state } = view;
+          const { from } = state.selection.main;
+
+          const line = state.doc.lineAt(from);
+          const beforeCursor = line.text.slice(0, from - line.from);
+
+          // Copy the current line's indentation
+          let indent = (line.text.match(/^\s*/) ?? [""])[0];
+
+          // If the line ends with "then" or "do", indent one more level
+          if (/\b(?:then|do|else)\s*$/.test(beforeCursor)) {
+            indent += "  ";
+          }
+
+          view.dispatch(state.replaceSelection("\n" + indent));
+          return true;
+        }
       }
     ])
   ]
@@ -150,8 +144,8 @@ const editor = new EditorView({
 function nodeToJSON(cursor) {
   const result = {
     type: cursor.type.name,
-    from: cursor.from,
-    to: cursor.to,
+    // from: cursor.from,
+    // to: cursor.to,
     children: []
   };
 
@@ -179,20 +173,20 @@ function showTree() {
     return pos - line.from;
   };
 
-  tree.iterate({
-    enter(node) {
-      const lineNum = getLineNum(node.from);
-      const columnNum = getColumnNum(node.from);
-      const str = text.substring(node.from, node.to).replace(/\n/g, "\\n\n");
-      console.log(
-        "  ".repeat(node.node.depth) +
-        `${node.type.name}\n${str}`
-      );
-    }
-  });
+  // tree.iterate({
+  //   enter(node) {
+  //     const lineNum = getLineNum(node.from);
+  //     const columnNum = getColumnNum(node.from);
+  //     const str = text.substring(node.from, node.to).replace(/\n/g, "\\n\n");
+  //     console.log(
+  //       "  ".repeat(node.node.depth) +
+  //       `${node.type.name}\n${str}`
+  //     );
+  //   }
+  // });
 
-  // const json = nodeToJSON(tree.cursor());
-  // console.log(JSON.stringify(json, null, 2));
+  const json = nodeToJSON(tree.cursor());
+  console.log(json);
 }
 
 document.getElementById("run").addEventListener("click", showTree);
