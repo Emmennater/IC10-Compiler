@@ -2,9 +2,9 @@
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { javascript } from "@codemirror/lang-javascript";
 import { acceptCompletion } from "@codemirror/autocomplete";
-import { insertTab, indentLess, history, historyKeymap } from "@codemirror/commands";
+import { insertTab, indentLess, indentMore, history, historyKeymap } from "@codemirror/commands";
 import { parser } from "./parser.js";
-import { LRLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
 
 const starterCode = `
@@ -100,6 +100,7 @@ const editor = new EditorView({
     lang,
     lineNumbers(),
     history(),
+    indentUnit.of("  "),
     keymap.of([
       ...historyKeymap,
       {
@@ -108,7 +109,22 @@ const editor = new EditorView({
           if (acceptCompletion(view))
             return true;
 
-          view.dispatch(view.state.replaceSelection("  "));
+          let { state, dispatch } = view;
+
+          // keep normal multi-line/selection indent behavior
+          if (state.selection.ranges.some(r => !r.empty)) {
+            return indentMore({ state, dispatch })
+          }
+
+          let { from, to } = state.selection.main;
+          let column = from - state.doc.lineAt(from).from;
+
+          if (column % 2 == 0) {
+            dispatch(state.replaceSelection("  "));
+          } else {
+            dispatch(state.replaceSelection(" "));
+          }
+
           return true;
         }
       },
@@ -135,6 +151,32 @@ const editor = new EditorView({
 
           view.dispatch(state.replaceSelection("\n" + indent));
           return true;
+        }
+      },
+      {
+        key: "Backspace",
+        run(view) {
+          const { state } = view;
+          const { from, to, empty } = state.selection.main;
+
+          // Let the default behavior handle selections
+          if (!empty) return false;
+
+          // If on an odd column only delete one
+          let column = from - state.doc.lineAt(from).from;
+          if (column % 2 === 1) return false;
+
+          if (from >= 2 && state.doc.sliceString(from - 2, from) === "  ") {
+            view.dispatch({
+              changes: {
+                from: from - 2,
+                to: from
+              }
+            });
+            return true;
+          }
+
+          return false;
         }
       }
     ])
