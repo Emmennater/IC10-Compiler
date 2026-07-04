@@ -1,27 +1,37 @@
 
-import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+import {
+  EditorView, keymap, lineNumbers, drawSelection, highlightActiveLineGutter,
+  highlightActiveLine
+} from "@codemirror/view";
 import { javascript } from "@codemirror/lang-javascript";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { insertTab, indentLess, indentMore, history, historyKeymap, toggleComment } from "@codemirror/commands";
 import { parser } from "./parser.js";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
+import { transpile } from "./transpiler.js";
+
+// const starterCode = `
+// let machine = d0
+// let stacker = d1
+
+// machine.ClearMemory = 1
+
+// loop
+//   yield
+//   if machine.ExportCount == stacker.Setting then
+//     machine.Activate = 0
+//     machine.ClearMemory = 1
+//     continue
+//   elif machine.Activate == 0 then
+//     machine.ClearMemory = 1
+//     break
+//   end
+// end
+// `.substring(1);
 
 const starterCode = `
 let machine = d0
-let stacker = d1
-
-machine.ClearMemory = 1
-
-while true do
-  yield
-  if machine.ExportCount == stacker.Setting then
-    machine.Activate = 0
-    machine.ClearMemory = 1
-  elseif machine.Activate == 0 then
-    machine.ClearMemory = 1
-  end
-end
 `.substring(1);
 
 const device = Tag.define();
@@ -33,27 +43,51 @@ const myCustomTheme = EditorView.theme({
     color: "#e0e0e0",
     backgroundColor: "#282C34",
     width: "100%",
-    height: "100%"
+    height: "100%",
+    padding: "0px"
+  },
+  // The main editor area
+  ".cm-content, .cm-gutter": {
+    minHeight: "200px",
+    padding: "0px",
   },
   // The background area containing line numbers
   ".cm-gutters": {
     backgroundColor: "#282C34",
     color: "#858585",
     border: "none",
-    paddingRight: "14px",
+    padding: "0px",
     borderRight: "2px solid #535964"
   },
-  // Style for the text selection
-  ".cm-content, .cm-gutter": {
-    minHeight: "200px"
+  // Line number gutter
+  "& .cm-gutterElement": {
+    display: "flex",
+    width: "60px",
+    alignItems: "center",
+    justifyContent: "center",
+    boxSizing: "border-box"
   },
-  "&.cm-focused": {
-    outline: "none"
+  // Active line
+  "& .cm-activeLine": {
+    backgroundColor: "#ffffff11"
   },
-  // Style for the flashing cursor
-  ".cm-cursor, & .cm-dropCursor": {
-    borderLeftColor: "#ffffff"
-  }
+  // Active line gutter
+  ".cm-activeLineGutter": {
+    color: "#b7b7b7",
+    backgroundColor: "#363b45"
+  },
+  // Caret color
+  "&.cm-focused .cm-cursor": {
+    borderLeft: "2px solid #7e8797"
+  },
+  // Selection color (focused)
+  "&.cm-focused .cm-scroller > .cm-selectionLayer > .cm-selectionBackground": {
+    backgroundColor: "#ffffff22"
+  },
+  // Selection color (unfocused)
+  "&.cm-selectionBackground": {
+    backgroundColor: "#ffffff22"
+  },
 }, { dark: true });
 
 const myHighlightStyle = HighlightStyle.define([
@@ -80,13 +114,14 @@ const lang = LRLanguage.define({
         Number: t.number,
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon": t.operator,
         "InstructionName FunctionName": t.function(t.variableName),
-        "if then elseif else end let while do": t.keyword,
+        "if then elif else end let while do loop break continue": t.keyword,
         String: t.string,
         Device: device,
         Register: register,
         Bool: t.bool,
         LabelName: t.labelName,
         Comment: t.comment,
+        VariableName: t.variableName
       })
     ]
   }),
@@ -102,6 +137,9 @@ const editor = new EditorView({
     myCustomThemeExtension,
     lang,
     lineNumbers(),
+    drawSelection(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
     history(),
     indentUnit.of("  "),
     keymap.of([
@@ -208,10 +246,7 @@ function nodeToJSON(cursor) {
   return result;
 }
 
-function showTree() {
-  const text = editor.state.doc.toString();
-  const tree = parser.parse(text);
-
+function showTree(tree, text) {
   const getLineNum = pos => {
     const line = editor.state.doc.lineAt(pos);
     return line.number;
@@ -222,20 +257,27 @@ function showTree() {
     return pos - line.from;
   };
 
-  // tree.iterate({
-  //   enter(node) {
-  //     const lineNum = getLineNum(node.from);
-  //     const columnNum = getColumnNum(node.from);
-  //     const str = text.substring(node.from, node.to).replace(/\n/g, "\\n\n");
-  //     console.log(
-  //       "  ".repeat(node.node.depth) +
-  //       `${node.type.name}\n${str}`
-  //     );
-  //   }
-  // });
+  tree.iterate({
+    enter(node) {
+      const lineNum = getLineNum(node.from);
+      const columnNum = getColumnNum(node.from);
+      const str = text.substring(node.from, node.to).replace(/\n/g, "\\n\n");
+      console.log(
+        "  ".repeat(node.node.depth) +
+        `${node.type.name}\n${str}`
+      );
+    }
+  });
 
   const json = nodeToJSON(tree.cursor());
   console.log(json);
 }
 
-document.getElementById("run").addEventListener("click", showTree);
+function run() {
+  const text = editor.state.doc.toString();
+  const tree = parser.parse(text);
+  // showTree(tree, text);
+  transpile(tree, text);
+}
+
+document.getElementById("run").addEventListener("click", run);

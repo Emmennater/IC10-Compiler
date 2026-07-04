@@ -7,27 +7,25 @@ kwn<term> { @specialize[@name={term}]<identifier, term> }
 
 block { newline* ((statement (newline+ statement)*) newline*)? }
 
-statement { Instruction | IfExpr | WhileExpr | Declaration | Assignment | Label }
+statement {
+  Instruction | IfExpr | WhileExpr | LoopExpr | Declaration | Assignment | Label |
+  kwn<"break"> | kwn<"continue">
+}
 
 Instruction { InstructionName expression* }
 
 If { kwn<"if"> expression kwn<"then"> newline block }
-ElseIf { kwn<"elseif"> expression kwn<"then"> newline block }
+ElseIf { kwn<"elif"> expression kwn<"then"> newline block }
 Else { kwn<"else"> newline block }
+IfExpr { If ElseIf* Else? kwn<"end"> }
 
-IfExpr {
-  If
-  ElseIf*
-  Else?
-  kwn<"end">
-}
+WhileExpr { kwn<"while"> expression kwn<"do"> newline block kwn<"end"> }
 
-WhileExpr {
-  kwn<"while"> expression kwn<"do"> newline block
-  kwn<"end">
-}
+LoopExpr { kwn<"loop"> newline block kwn<"end"> }
 
-Declaration { @specialize[@name="let"]<identifier, "let"> identifier Assign expression }
+VariableName { identifier }
+
+Declaration { @specialize[@name="let"]<identifier, "let"> VariableName Assign expression }
 
 Assignment { Property Assign expression }
 
