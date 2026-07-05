@@ -149,13 +149,7 @@ const lang = LRLanguage.define({
   }
 });
 
-const myCustomExtensions = [
-  myCustomThemeExtension,
-  lang,
-  lineNumbers(),
-  drawSelection(),
-  highlightActiveLineGutter(),
-  highlightActiveLine(),
+const keymapExtensions = [
   history(),
   indentUnit.of("  "),
   keymap.of([
@@ -288,6 +282,15 @@ const myCustomExtensions = [
   })
 ];
 
+const myCustomExtensions = [
+  myCustomThemeExtension,
+  lang,
+  lineNumbers(),
+  drawSelection(),
+  highlightActiveLineGutter(),
+  highlightActiveLine(),
+];
+
 const nonEditable = [
   EditorState.readOnly.of(true),
   EditorView.contentAttributes.of({tabindex: "0"})
@@ -296,7 +299,7 @@ const nonEditable = [
 const editor = new EditorView({
   parent: document.getElementById("editor-container"),
   doc: starterCode,
-  extensions: myCustomExtensions
+  extensions: [...myCustomExtensions, ...keymapExtensions]
 });
 
 const output = new EditorView({
