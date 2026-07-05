@@ -72,6 +72,10 @@ html, body {
     2px 2.5px 0px #733d39; */
 }
 
+.title .output {
+  color: #d2a8ff;
+}
+
 button {
   width: 100px;
   font-size: 24px;
