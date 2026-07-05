@@ -4,20 +4,35 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IC10 Transpiler</title>
-  <script type="module" crossorigin src="/IC10-Transpiler/assets/index-DLqFtveL.js"></script>
-  <link rel="stylesheet" crossorigin href="/IC10-Transpiler/assets/index-DPRQo-6g.css">
+  <script type="module" crossorigin src="/IC10-Transpiler/assets/index-C8fGtn8p.js"></script>
+  <link rel="stylesheet" crossorigin href="/IC10-Transpiler/assets/index-NkteT50j.css">
 </head>
 <body>
-  <vbox class="main">
-    <hbox>
-      <div class="header">
-        <span class="title">
-          <span class="start">IC10</span> // <span class="end">Transpiler</span>
-        </span>
-        <button id="run">Run</button>
-      </div>
-    </hbox>
-    <div id="editor-container"></div>
+  <hbox class="main">
+    <vbox class="panel">
+      <hbox>
+        <div class="header">
+          <span class="title">
+            <span class="start">IC10</span> //
+            <span class="mid">Transpiler</span> //
+            <span class="end">v1.0</span>
+          </span>
+          <button id="run">Run</button>
+        </div>
+      </hbox>
+      <div id="editor-container" class="text-editor"></div>
+    </vbox>
+    <vbox class="panel right">
+      <hbox>
+        <div class="header">
+          <span class="title">
+            Output
+          </span>
+          <button id="copy">Copy</button>
+        </div>
+      </hbox>
+      <div id="output-container" class="text-editor"></div>
+    </vbox>
   </vbox>
 </body>
 </html>
