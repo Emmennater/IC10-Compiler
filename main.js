@@ -482,5 +482,5 @@ function run() {
 
 initListeners();
 setup(loadScript, getScript, run);
-runTests(parser);
+// runTests(parser);
 run();

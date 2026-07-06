@@ -74,7 +74,10 @@ function updateScriptName() {
   }
 
   localStorage.setItem(LAST_SCRIPT_LOCAL_STORAGE_KEY, newScriptName);
-  const scripts = JSON.parse(localStorage.getItem(SCRIPTS_LOCAL_STORAGE_KEY));
+  let scripts = JSON.parse(localStorage.getItem(SCRIPTS_LOCAL_STORAGE_KEY));
+
+  if (!isObject(scripts)) scripts = {};
+
   scripts[newScriptName] = scripts[oldScriptName];
   delete scripts[oldScriptName];
   localStorage.setItem(SCRIPTS_LOCAL_STORAGE_KEY, JSON.stringify(scripts));
@@ -91,6 +94,11 @@ function updateLastScript() {
 function getSavedScript(name) {
   let scripts = localStorage.getItem(SCRIPTS_LOCAL_STORAGE_KEY);
   scripts = JSON.parse(scripts);
+
+  if (!isObject(scripts)) {
+    scripts = {};
+  }
+
   return scripts[name];
 }
 
