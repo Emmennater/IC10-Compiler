@@ -208,6 +208,12 @@ export function setup(loadScript, getScript, compile) {
       option.innerText = name;
       option.classList.add("item");
       option.addEventListener("mousedown", () => {
+        if (!lastSaved &&
+          !window.confirm("You have unsaved changes. Are you sure you want to open a new script?")) {
+          scripts.style.display = "none";
+          return;
+        }
+
         document.getElementById("scripts-input").value = name;
         const scriptText = getSavedScript(name);
 

@@ -11,7 +11,7 @@ import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@cod
 import { setDiagnostics, lintGutter, forceLinting } from "@codemirror/lint";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
 import { parser } from "./parser.js";
-import { transpile, CompilerError } from "./transpiler.js";
+import { transpile, CompilerError } from "./compiler.js";
 import { runTests } from "./tests.js";
 import { getAST } from "./helper.js";
 import { setup, save, notSaved } from "./save-load.js";
@@ -343,8 +343,10 @@ const autosaveExtensions = [
     if (update.docChanged && !ignoreSave) {
       const text = editor.state.doc.toString();
       notSaved();
-      save(text);
       clearErrors();
+      
+      // Uncomment to save on every keystroke
+      // save(text);
       
       return false;
     }

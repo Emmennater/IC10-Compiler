@@ -344,7 +344,7 @@ export function transpile(ast, text) {
       addInstruction(`move ${outRegister} ${operand.text}`);
       break;
     case "!":
-      addInstuction(`seq ${outRegister} ${operand.text} 0`);
+      addInstruction(`seq ${outRegister} ${operand.text} 0`);
       break;
     default:
       throw new CompilerError(`Unknown unary operator: ${op.text}`);
@@ -685,6 +685,8 @@ export function transpile(ast, text) {
 
     if (value.type === "Number") {
       addInstruction(`define ${variableName} ${value.text}`);
+    } else if (value.type === "Bool") {
+      addInstruction(`define ${variableName} ${value.text === "true" ? "1" : "0"}`);
     } else {
       addInstruction(`define ${variableName} HASH("${value.text}")`);
     }

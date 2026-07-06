@@ -1,4 +1,4 @@
-import { transpile } from "./transpiler.js";
+import { transpile } from "./compiler.js";
 import { getAST } from "./helper.js";
 
 const cases = `
