@@ -255,6 +255,17 @@ sleep(x)
 
 move r10 DisplayMode.Seconds
 sleep r10
+
+# Newline whitespace
+if (
+  1 + 1
+) > 2 then yield end
+
+add r0 1 1
+sgt r0 r0 2
+beq r0 0 end1
+yield
+end1:
 `;
 
 const codeExamples = {

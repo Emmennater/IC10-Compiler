@@ -25,6 +25,10 @@ loop
 end
 `.substring(1);
 
+function isObject(obj) {
+  return obj !== null && typeof obj === "object";
+}
+
 function generateDefaultScriptName(boilerplate = false) {
   const currentScriptName = document.getElementById("scripts-input").value;
   const prefix = boilerplate ? "default-script" : "script";
@@ -45,6 +49,7 @@ function generateDefaultScriptName(boilerplate = false) {
 function getScriptNames() {
   let scripts = localStorage.getItem(SCRIPTS_LOCAL_STORAGE_KEY);
   scripts = JSON.parse(scripts);
+  if (!isObject(scripts)) return [];
   return Object.keys(scripts);
 }
 
@@ -102,8 +107,6 @@ function saveScript(text) {
   } catch (e) {
     scripts = {};
   }
-
-  const isObject = (obj) => { return obj !== null && typeof obj === "object"; }
 
   if (!isObject(scripts)) {
     scripts = {};
@@ -265,6 +268,9 @@ export function setup(loadScript, getScript, compile) {
     const scriptName = document.getElementById("scripts-input").value;
     const scripts = localStorage.getItem(SCRIPTS_LOCAL_STORAGE_KEY);
     const scriptsJson = JSON.parse(scripts);
+
+    if (!isObject(scriptsJson)) return;
+
     delete scriptsJson[scriptName];
     
     document.getElementById("scripts-input").value = "";
