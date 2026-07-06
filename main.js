@@ -229,7 +229,7 @@ const keymapExtensions = [
         let indent = (line.text.match(/^\s*/) ?? [""])[0];
 
         // If the line ends with "then", "do", or "else", indent one more level
-        if (/\b(?:then|do|else)\s*$/.test(beforeCursor)) {
+        if (/\b(?:then|do|else|loop)\s*$/.test(beforeCursor)) {
           indent += "  ";
         }
 
