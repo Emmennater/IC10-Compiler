@@ -17,10 +17,8 @@ loop
   if machine.ExportCount == stacker.Setting then
     machine.Activate = 0
     machine.ClearMemory = 1
-    continue
   elif machine.Activate == 0 then
     machine.ClearMemory = 1
-    break
   end
 end
 `.substring(1);
