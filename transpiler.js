@@ -30,6 +30,21 @@ put db 0 r10
 move r10 6
 */
 
+export class CompilerError extends Error {
+  static from = 0;
+  static to = 0;
+
+  constructor(message) {
+    super(message);
+    this.from = CompilerError.from;
+    this.to = CompilerError.to;
+  }
+
+  toString() {
+    return `${this.message} (${this.from.line}:${this.from.column} - ${this.to.line}:${this.to.column})`;
+  }
+}
+
 const OP_INSTRUCTIONS = {
   "+": "add",
   "-": "sub",
@@ -149,7 +164,7 @@ class Cache {
   }
 }
 
-export function transpile(ast) {
+export function transpile(ast, text) {
   let gen = "";
   let statements = ast.children;
   let cache = new Cache();
@@ -224,18 +239,15 @@ export function transpile(ast) {
 
       if (idx == 0) {
         if (identifier.type !== "VariableName" && identifier.type !== "Device") {
-          throw "Expected identifier or device for property accessor";
+          throw CompilerError("Expected identifier or device for property accessor");
         }
       } else {
         if (identifier.type !== "VariableName") {
-          throw "Expected identifier for property accessor";
+          throw CompilerError("Expected identifier for property accessor");
         }
       }
 
-      identifiers.push({
-        type: identifier.type,
-        text: identifier.text
-      });
+      identifiers.push(identifier);
       
       if (expr.children.length === 1) break;
       
@@ -250,6 +262,17 @@ export function transpile(ast) {
   function makeDefinition(variableName, value) {
     prependInstruction(`define ${variableName} ${value}`);
     defined.set(variableName, value);
+  }
+
+  function locationOf(index) {
+    // Count number of newlines before index to get line number
+    const line = text.slice(0, index).split("\n").length - 1;
+    const column = index - text.lastIndexOf("\n", index) - 1;
+    return [line, column];
+  }
+
+  function coords(from, to) {
+    return [locationOf(from), locationOf(to)];
   }
 
   // Expressions
@@ -324,7 +347,7 @@ export function transpile(ast) {
       addInstuction(`seq ${outRegister} ${operand.text} 0`);
       break;
     default:
-      throw new Error(`Unknown unary operator: ${op.text}`);
+      throw new CompilerError(`Unknown unary operator: ${op.text}`);
     }
 
     return { type: "Register", text: outRegister };
@@ -339,17 +362,17 @@ export function transpile(ast) {
       let device = variableName;
 
       if (expr.children.length === 1) {
-        throw "Expected property accessor";
+        throw new CompilerError("Expected property accessor");
       }
 
       if (expr.children[2].children.length !== 1) {
-        throw "Expected only one property accessor";
+        throw new CompilerError("Expected only one property accessor");
       }
 
       const attribute = expr.children[2].children[0];
       
       if (attribute.type !== "VariableName") {
-        throw "Expected attribute to be a variable name";
+        throw new CompilerError("Expected attribute to be a variable name");
       }
       
       if (outRegister === "none") outRegister = cache.getTemp();
@@ -419,7 +442,7 @@ export function transpile(ast) {
       let attribute = expr.children[6];
 
       if (attribute.type !== "String") {
-        throw "Expected slot attribute to be a string";
+        throw new CompilerError("Expected slot attribute to be a string");
       }
 
       // Remove quotes
@@ -434,7 +457,7 @@ export function transpile(ast) {
     const batchModes = new Set(["Average", "Sum", "Minimum", "Maximum"]);
 
     if (!batchModes.has(functionName)) {
-      throw "Invalid batch mode";
+      throw new CompilerError("Invalid batch mode");
     }
 
     // Check if this is a batch operation
@@ -492,7 +515,11 @@ export function transpile(ast) {
       return functionCall(expr, outRegister);
     }
 
-    throw `Unknown expression type: ${expr.type}`;
+    if (expr.type === "⚠") {
+      throw new CompilerError("Unexpected input");
+    } else {
+      throw new CompilerError(`Unknown expression type: ${expr.type}`);
+    }
   }
 
   // Statements
@@ -525,7 +552,7 @@ export function transpile(ast) {
     // Setting lone variables
     if (idfs.length === 1) {
       if (idfs[0].type !== "VariableName") {
-        throw "Expected assignment target to be a variable name";
+        throw new CompilerError("Expected assignment target to be a variable name");
       }
 
       let variableName = idfs[0].text;
@@ -542,7 +569,7 @@ export function transpile(ast) {
 
     if (device.type === "Device" || devices.has(device.text)) {
       if (idfs.length !== 2) {
-        throw "Expected only one property accessor";
+        throw new CompilerError("Expected only one property accessor");
       }
 
       // Setting a device attribute
@@ -666,6 +693,10 @@ export function transpile(ast) {
   }
 
   function processStatement(statement, scope) {
+    // Update compiler error position
+    CompilerError.from = statement.from;
+    CompilerError.to = statement.to;
+
     if (statement.type === "Declaration") {
       return declaration(statement);
     }

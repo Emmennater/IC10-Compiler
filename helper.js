@@ -30,6 +30,8 @@ function nodeToJSON(cursor, text) {
   const result = {
     type: cursor.type.name,
     text: text.substring(cursor.from, cursor.to),
+    from: cursor.from,
+    to: cursor.to,
     children: []
   };
 

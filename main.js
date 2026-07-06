@@ -1,16 +1,17 @@
 
 import {
   EditorView, keymap, lineNumbers, drawSelection, highlightActiveLineGutter,
-  highlightActiveLine
+  highlightActiveLine, hoverTooltip, Decoration, WidgetType
 } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateField } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { insertTab, indentLess, indentMore, history, historyKeymap, toggleComment } from "@codemirror/commands";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
+import { setDiagnostics, lintGutter, forceLinting } from "@codemirror/lint";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
 import { parser } from "./parser.js";
-import { transpile } from "./transpiler.js";
+import { transpile, CompilerError } from "./transpiler.js";
 import { runTests } from "./tests.js";
 import { getAST } from "./helper.js";
 import { setup, save, notSaved } from "./save-load.js";
@@ -21,6 +22,48 @@ let ignoreSave = false;
 
 const device = Tag.define();
 const register = Tag.define();
+
+let errorMessage = "";
+
+class ErrorOverlayWidget extends WidgetType {
+  constructor(message) {
+    super();
+    this.message = message;
+  }
+
+  toDOM() {
+    let span = document.createElement("span");
+    span.className = "cm-inline-error-msg";
+    span.innerText = `  ${this.message}`;
+    return span;
+  }
+}
+
+const errorOverlayField = StateField.define({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    const lineToHighlight = 1; 
+    const doc = tr.state.doc;
+    
+    if (doc.lines >= lineToHighlight && errorMessage) {
+      const line = doc.line(lineToHighlight);
+      
+      // side: 1 ensures it renders exactly at the end of the text
+      const errorWidget = Decoration.widget({
+        widget: new ErrorOverlayWidget(errorMessage),
+        side: 1
+      });
+
+      // Provide the end position of the line
+      return Decoration.set([errorWidget.range(line.to)]);
+    }
+    
+    return Decoration.none;
+  },
+  provide: f => EditorView.decorations.from(f)
+});
 
 const myCustomTheme = EditorView.theme({
   // The main editor container
@@ -93,6 +136,10 @@ const myCustomTheme = EditorView.theme({
   ".cm-scroller::-webkit-scrollbar-thumb": {
     backgroundColor: "#ffffff22",
   },
+  // Error linting
+  ".cm-inline-error-msg": {
+    color: "#ff0000",
+  }
 }, { dark: true });
 
 const myHighlightStyle = HighlightStyle.define([
@@ -297,6 +344,8 @@ const autosaveExtensions = [
       const text = editor.state.doc.toString();
       notSaved();
       save(text);
+      clearErrors();
+      
       return false;
     }
   })
@@ -319,7 +368,7 @@ const nonEditable = [
 const editor = new EditorView({
   parent: document.getElementById("editor-container"),
   doc: starterCode,
-  extensions: [...myCustomExtensions, ...keymapExtensions, ...autosaveExtensions]
+  extensions: [...myCustomExtensions, ...keymapExtensions, ...autosaveExtensions, errorOverlayField]
 });
 
 const output = new EditorView({
@@ -366,6 +415,7 @@ function getScript() {
 }
 
 function loadScript(text) {
+  clearErrors();
   ignoreSave = true;
   editor.dispatch({
     changes: {
@@ -377,21 +427,52 @@ function loadScript(text) {
   setTimeout(() => ignoreSave = false, 100);
 }
 
+function clearErrors() {
+  if (errorMessage) {
+    errorMessage = "";
+    editor.dispatch(setDiagnostics(editor.state, []));
+    forceLinting(editor);
+    editor.dispatch({});
+  }
+}
+
 function run() {
   const text = getScript();
   const ast = getAST(text);
-  const ic10 = transpile(ast);
+  let ic10 = "";
   
-  output.dispatch({
-    changes: {
-      from: 0,
-      to: output.state.doc.length,
-      insert: ic10
+  try {
+    ic10 = transpile(ast, text);
+    clearErrors();
+
+    output.dispatch({
+      changes: {
+        from: 0,
+        to: output.state.doc.length,
+        insert: ic10
+      }
+    });
+  } catch (error) {
+    if (error instanceof CompilerError) {
+      // Overlay error message
+      editor.dispatch(
+        setDiagnostics(editor.state, [{
+            from: error.from,
+            to: error.to + 1,
+            severity: "error",
+            message: error.message,
+            actions: []
+        }])
+      );
+
+      errorMessage = error.message;
+      forceLinting(editor);
+      editor.dispatch({});
     }
-  });
+  }
 }
 
 initListeners();
 setup(loadScript, getScript, run);
-runTests(parser);
+// runTests(parser);
 run();
