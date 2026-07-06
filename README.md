@@ -2,6 +2,21 @@
 ### [>>> Visit Website <<<](https://emmennater.github.io/IC10-Compiler/)
 This is a `high-level language` for `IC10` that is meant to be fully `backwards compatible` with the standard IC10 programming language. Any function written that is not recognized by the compiler will be converted into an IC10 instruction.
 ![1783363348960](image/README/example.png)
+## Using the Compiler
+When you first load the webpage a default script will be loaded. The `✖` next to the name `default-script` means the script is not saved.
+A checkmark `✔` indicates the script has been saved and you can safely retrieve it later.
+
+### Saving
+Saving takes place in `local storage` which is unqiue to the computer and browser.
+Save by pressing `Ctrl + S`. To `rename` a script, change the text in the text input then press `Ctrl + S`.
+
+### Loading Scripts
+The drop down `V` will show any other scripts you have saved. The plus `+` will add
+a new script with a default name.
+
+### Deleting Scripts
+The trash `🗑` will delete the currently loaded script.
+
 ## Documentation
 The top example is written in the high level code.
 The bottom example is the compiled output in `IC10`.
