@@ -7,6 +7,8 @@ let lastSaved = false;
 let currentScriptName = "";
 
 const defaultScriptText = `
+# This script automatically stops a machine after producing
+# the number of items that the stacker is set to.
 device machine = d0
 device stacker = d1
 
