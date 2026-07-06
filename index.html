@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IC10 Compiler</title>
-  <script type="module" crossorigin src="/IC10-Compiler/assets/index-DXJ6Igar.js"></script>
-  <link rel="stylesheet" crossorigin href="/IC10-Compiler/assets/index-CVxKjdqA.css">
+  <script type="module" crossorigin src="/IC10-Compiler/assets/index-SPFEw66T.js"></script>
+  <link rel="stylesheet" crossorigin href="/IC10-Compiler/assets/index-BG17rbxg.css">
 </head>
 <body>
   <hbox class="main">
@@ -16,7 +16,17 @@
             <span class="mid">Compiler</span> //
             <span class="end">v1.0</span>
           </span>
-          <button id="run">Run</button>
+          <div class="options">
+            <div id="saved-icon">✔</div>
+            <div class="input-wrapper">
+              <input id="scripts-input" type="text">
+              <button id="scripts-button">V</button>
+              <button id="new-script">+</button>
+              <button id="delete-script">🗑</button>
+              <div id="scripts" class="dropdown" style="display: none;"></div>
+            </div>
+            <button id="run">Run</button>
+          </div>
         </div>
       </hbox>
       <div id="editor-container" class="text-editor"></div>
@@ -27,7 +37,9 @@
           <span class="title">
             <span class="output">IC10</span>
           </span>
-          <button id="copy">Copy</button>
+          <div class="options">
+            <button id="copy">Copy</button>
+          </div>
         </div>
       </hbox>
       <div id="output-container" class="text-editor"></div>
