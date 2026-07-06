@@ -427,6 +427,7 @@ function loadScript(text) {
     }
   });
   setTimeout(() => ignoreSave = false, 100);
+  run();
 }
 
 function clearErrors() {
@@ -473,6 +474,8 @@ function run() {
       errorMessage = error.message;
       forceLinting(editor);
       editor.dispatch({});
+    } else {
+      console.error(error);
     }
   }
 }

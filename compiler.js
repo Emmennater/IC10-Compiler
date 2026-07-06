@@ -239,11 +239,11 @@ export function transpile(ast, text) {
 
       if (idx == 0) {
         if (identifier.type !== "VariableName" && identifier.type !== "Device") {
-          throw CompilerError("Expected identifier or device for property accessor");
+          throw new CompilerError("Expected identifier or device for property accessor");
         }
       } else {
         if (identifier.type !== "VariableName") {
-          throw CompilerError("Expected identifier for property accessor");
+          throw new CompilerError("Expected identifier for property accessor");
         }
       }
 
@@ -395,6 +395,14 @@ export function transpile(ast, text) {
     }
     
     if (!cache.has(variableName)) {
+      if (expr.children[0].type === "Register") {
+        if (outRegister !== "none") {
+          addInstruction(`move ${outRegister} ${expr.children[0].text}`);
+        }
+
+        return expr;
+      }
+
       if (outRegister !== "none") {
         const idfs = collapseProperty(expr);
         addInstruction(`move ${outRegister} ${idfs.map(idf => idf.text).join(".")}`);
@@ -735,8 +743,8 @@ export function transpile(ast, text) {
 
   function jump(statement) {
     const istructionName = statement.children[0].text;
-    const label = statement.children[1].text;
-    addInstruction(`${istructionName} ${label}`);
+    const label = processExpression(statement.children[1]);
+    addInstruction(`${istructionName} ${label.text}`);
   }
 
   function instruction(statement) {

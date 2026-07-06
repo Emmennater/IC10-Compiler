@@ -257,6 +257,232 @@ move r10 DisplayMode.Seconds
 sleep r10
 `;
 
+const codeExamples = {
+  "bulk plant harvester": [
+    `
+device larre = d0
+device vending = d1
+device importBin = d2
+define plantSeeds = SeedBag_Potato
+define plantName = ItemPotato
+define stackSize 20
+define plants = 13
+define dropPos = 14
+define pickupPos = 15
+define homePos = 16
+
+let ra2
+let target
+let seeds
+let planted = false
+
+loop
+  jal plant
+  seeds = 1
+  jal pick
+  seeds = 0
+  jal pick
+end
+
+wait:
+loop
+  yield
+  if larre.Idle == 1 then
+    break
+  end
+end
+j ra
+
+pick:
+ra2 = ra
+target = plants
+loop
+  larre.Setting = target
+  jal wait
+  loop
+    if loadSlot(larre, 255, "Seeding") != seeds || loadSlot(larre, 255, "Mature") == 0 || loadSlot(larre, 0, "Quantity") == stackSize then
+      break
+    end
+    larre.Activate = 1
+    jal wait
+  end
+  target = target - 1
+  if target == -1 then
+    break
+  end
+end
+if loadSlot(larre, 0, "Quantity") > 0 then
+  larre.Setting = dropPos
+  jal wait
+  larre.Activate = 1
+  jal wait
+  importBin.Open = 0
+  if seeds == 0 then
+    planted = false
+  end
+end
+j ra2
+
+plant:
+if planted then
+  j ra
+end
+ra2 = ra
+vending.RequestHash = plantSeeds
+larre.Setting = pickupPos
+jal wait
+larre.Activate = 1
+jal wait
+if loadSlot(larre, 0, "Quantity") == 0 then
+  vending.RequestHash = plantName
+  sleep 1
+  larre.Activate = 1
+  jal wait
+end
+target = plants
+loop
+  larre.Setting = target
+  jal wait
+  if loadSlot(larre, 255, "Occupied") == 0 then
+    larre.Activate = 1
+    jal wait
+  end
+  target = target - 1
+  if target == -1 then
+    break
+  end
+end
+if loadSlot(larre, 0, "Quantity") > 0 then
+  larre.Setting = dropPos
+  jal wait
+  larre.Activate = 1
+  jal wait
+  importBin.Open = 0
+  planted = true
+end
+j ra2`,
+    `
+alias larre d0
+alias vending d1
+alias importBin d2
+define plantSeeds HASH("SeedBag_Potato")
+define plantName HASH("ItemPotato")
+define stackSize 20
+define plants 13
+define dropPos 14
+define pickupPos 15
+define homePos 16
+move r13 0
+scope1:
+jal plant
+move r12 1
+jal pick
+move r12 0
+jal pick
+j scope1
+wait:
+scope2:
+yield
+l r0 larre Idle
+seq r0 r0 1
+beq r0 0 end3
+j end2
+end3:
+j scope2
+end2:
+j ra
+pick:
+move r10 ra
+move r11 plants
+scope4:
+s larre Setting r11
+jal wait
+scope5:
+ls r0 larre 255 Seeding
+sne r0 r0 r12
+ls r1 larre 255 Mature
+seq r1 r1 0
+or r0 r0 r1
+ls r1 larre 0 Quantity
+seq r1 r1 stackSize
+or r0 r0 r1
+beq r0 0 end6
+j end5
+end6:
+s larre Activate 1
+jal wait
+j scope5
+end5:
+sub r11 r11 1
+seq r0 r11 -1
+beq r0 0 end7
+j end4
+end7:
+j scope4
+end4:
+ls r0 larre 0 Quantity
+sgt r0 r0 0
+beq r0 0 end8
+s larre Setting dropPos
+jal wait
+s larre Activate 1
+jal wait
+s importBin Open 0
+seq r0 r12 0
+beq r0 0 end9
+move r13 0
+end9:
+end8:
+j r10
+plant:
+beq r13 0 end10
+j ra
+end10:
+move r10 ra
+s vending RequestHash plantSeeds
+s larre Setting pickupPos
+jal wait
+s larre Activate 1
+jal wait
+ls r0 larre 0 Quantity
+seq r0 r0 0
+beq r0 0 end11
+s vending RequestHash plantName
+sleep 1
+s larre Activate 1
+jal wait
+end11:
+move r11 plants
+scope12:
+s larre Setting r11
+jal wait
+ls r0 larre 255 Occupied
+seq r0 r0 0
+beq r0 0 end13
+s larre Activate 1
+jal wait
+end13:
+sub r11 r11 1
+seq r0 r11 -1
+beq r0 0 end14
+j end12
+end14:
+j scope12
+end12:
+ls r0 larre 0 Quantity
+sgt r0 r0 0
+beq r0 0 end15
+s larre Setting dropPos
+jal wait
+s larre Activate 1
+jal wait
+s importBin Open 0
+move r13 1
+end15:
+j r10`
+  ]
+};
+
 function format(char) {
   if (!char) return `'${char}'`;
   return `'${char.replace("\n", "\\n")}'`;
@@ -274,6 +500,15 @@ export function runTests() {
     output = output.trim();
     parsedCases.push([input, output]);
   });
+
+  // Add code examples
+  for (let example in codeExamples) {
+    testNames.push(`Code example ${example}`);
+    parsedCases.push([
+      codeExamples[example][0].trim(),
+      codeExamples[example][1].trim()
+    ]);
+  }
 
   for (let i = 0; i < parsedCases.length; i++) {
     let [input, output] = parsedCases[i];

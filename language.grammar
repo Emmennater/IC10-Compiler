@@ -58,7 +58,7 @@ FunctionCall { FunctionName !call ParenLeft expression (Comma expression)* Paren
 
 FunctionName { identifier }
 
-Jump { JumpInstructionName (VariableName | Register) }
+Jump { JumpInstructionName Property }
 
 JumpInstructionName { kw<"j"> | kw<"jal"> }
 
