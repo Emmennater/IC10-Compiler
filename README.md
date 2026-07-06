@@ -6,6 +6,7 @@ The bottom example is the compiled output in `IC10`.
 ### Table of Contents
 - [Declaring Variables](#declaring-variables)
 - [Using Variables](#using-variables)
+- [Comments](#comments)
 - [Arithmetic](#arithmetic)
 - [Booleans](#booleans)
 - [Loops](#loops)
@@ -37,6 +38,10 @@ let y = x
 ```
 move r10 1
 move r11 r10
+```
+### Comments
+```
+# This is a comment
 ```
 ### Arithmetic
 Click [here](#supported-operators) to see the list of all supported operators.
