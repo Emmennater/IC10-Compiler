@@ -291,7 +291,7 @@ export function setup(loadScript, getScript, compile) {
       updateLastScript();
     } else {
       // If there are no scripts, create a new one
-      document.getElementById("scripts-input").value = generateDefaultScriptName();
+      document.getElementById("scripts-input").value = generateDefaultScriptName(true);
       loadScript(defaultScriptText);
       notSaved();
       updateLastScript();
