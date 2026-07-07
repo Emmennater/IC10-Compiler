@@ -9,7 +9,8 @@ block { statement* }
 
 statement {
   Instruction | IfExpr | WhileExpr | LoopExpr | Declaration | DeviceDeclaration |
-  Definition | Assignment | Label | kwn<"break"> | kwn<"continue"> | FunctionCall | Jump
+  Definition | Assignment | Label | kwn<"break"> | kwn<"continue"> | FunctionCall | Jump |
+  FunctionDef | Return
 }
 
 If { kwn<"if"> expression kwn<"then"> block }
@@ -54,9 +55,18 @@ BinaryOp {
   expression !or LogicOr expression
 }
 
+FunctionDef {
+  kwn<"fn"> FunctionName !call ParenLeft VariableName (Comma VariableName)* ParenRight FunctionBlock
+  kwn<"end">
+}
+
+FunctionBlock { block }
+
 FunctionCall { FunctionName !call ParenLeft expression (Comma expression)* ParenRight }
 
 FunctionName { identifier }
+
+Return { kwn<"return"> expression }
 
 Jump { JumpInstructionName Property }
 

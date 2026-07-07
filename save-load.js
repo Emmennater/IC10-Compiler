@@ -245,6 +245,9 @@ export function setup(loadScript, getScript, compile) {
 
     if (scripts.children.length > 0) {
       scripts.style.display = scripts.style.display === "none" ? "block" : "none";
+
+      // Toggle class "open" for animation
+      document.getElementById("scripts-input-wrapper").classList.toggle("open");
     } else {
       alert("No other scripts found");
     }
@@ -289,6 +292,7 @@ export function setup(loadScript, getScript, compile) {
       document.getElementById("scripts-input").value = Object.keys(scriptsJson)[0];
       loadScript(scriptsJson[Object.keys(scriptsJson)[0]]);
       updateLastScript();
+      saveSuccessful(true);
     } else {
       // If there are no scripts, create a new one
       document.getElementById("scripts-input").value = generateDefaultScriptName(true);

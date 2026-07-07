@@ -1,0 +1,48 @@
+@precedence { call }
+
+kw<term> { @specialize<identifier, term> }
+// kwn<term> { @specialize[@name={term}]<identifier, term> }
+
+@top program { block }
+
+block { newline* statement (newline+ statement)* newline* }
+
+statement { Instruction | Label | FunctionCall }
+
+expression { VariableName | Number | String | FunctionCall | Device | Register }
+
+VariableName { identifier }
+
+LabelName { identifier }
+
+FunctionName { kw<"HASH"> }
+
+Label { LabelName Colon }
+
+FunctionCall { FunctionName !call ParenLeft String ParenRight }
+
+Instruction { InstructionName expression* }
+
+InstructionName { identifier }
+
+Device { kw<"d0"> | kw<"d1"> | kw<"d2"> | kw<"d3"> | kw<"d4"> | kw<"d5"> | kw<"db"> }
+
+Register {
+  kw<"r0"> | kw<"r1"> | kw<"r2"> | kw<"r3"> | kw<"r4"> | kw<"r5"> | kw<"r6"> | kw<"r7"> |
+  kw<"r8"> | kw<"r9"> | kw<"r10"> | kw<"r11"> | kw<"r12"> | kw<"r13"> | kw<"r14"> | kw<"r15"> |
+  kw<"r16"> | kw<"r17"> | kw<"sp"> | kw<"ra">
+}
+
+@tokens {
+  identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
+  space { $[\t \r]+ }
+  Number { @digit+ ("." | "." @digit+)? }
+  Colon { ":" }
+  newline { "\n" }
+  String { '"' (!["\\] | "\\" _)* '"' }
+  Comment { "#" ![\n]* }
+  ParenLeft { "(" }
+  ParenRight { ")" }
+}
+
+@skip { space | Comment }

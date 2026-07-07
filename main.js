@@ -1,7 +1,8 @@
 
 import {
-  EditorView, keymap, lineNumbers, drawSelection, highlightActiveLineGutter,
-  highlightActiveLine, hoverTooltip, Decoration, WidgetType
+  EditorView, keymap, lineNumbers, highlightActiveLineGutter,
+  highlightActiveLine, hoverTooltip, Decoration, WidgetType,
+  ViewPlugin
 } from "@codemirror/view";
 import { EditorState, StateField } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
@@ -11,6 +12,7 @@ import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@cod
 import { setDiagnostics, lintGutter, forceLinting } from "@codemirror/lint";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
 import { parser } from "./parser.js";
+import { parser as parser_ic10 } from "./parser_ic10.js";
 import { transpile, CompilerError } from "./compiler.js";
 import { runTests } from "./tests.js";
 import { getAST } from "./helper.js";
@@ -80,6 +82,11 @@ const myCustomTheme = EditorView.theme({
     minHeight: "200px",
     padding: "0px",
     paddingBottom: "var(--scroll-padding)",
+    lineHeight: "33px",
+    caretColor: "transparent",
+  },
+  ".cm-content ::selection": {
+    backgroundColor: "#ffffff22",
   },
   // The background area containing line numbers
   ".cm-gutters": {
@@ -98,11 +105,14 @@ const myCustomTheme = EditorView.theme({
     justifyContent: "center",
     boxSizing: "border-box"
   },
+  // Line
+  "& .cm-line": {
+    paddingLeft: "4px",
+  },
   // Active line
   "& .cm-activeLine": {
     backgroundColor: "#ffffff11"
   },
-
   "& .cm-activeLineGutter": {
     color: "#b7b7b7",
     backgroundColor: "#363b45"
@@ -116,22 +126,13 @@ const myCustomTheme = EditorView.theme({
     backgroundColor: "transparent",
     color: "inherit"
   },
-  // Caret color
-  "&.cm-focused .cm-cursor": {
-    borderLeft: "2px solid #959fb0"
-  },
-  // Selection color (focused)
-  "&.cm-focused .cm-scroller > .cm-selectionLayer > .cm-selectionBackground": {
-    backgroundColor: "#ffffff22"
-  },
-  // Selection color (unfocused)
-  "& .cm-scroller > .cm-selectionLayer > .cm-selectionBackground": {
-    backgroundColor: "#ffffff22"
-  },
   // Scrollbar
+  "& .cm-scroller": {
+    lineHeight: "normal",
+  },
   ".cm-scroller::-webkit-scrollbar": {
     width: "16px",
-    height: "16px"
+    height: "16px",
   },
   ".cm-scroller::-webkit-scrollbar-thumb": {
     backgroundColor: "#ffffff22",
@@ -163,14 +164,35 @@ const lang = LRLanguage.define({
   parser: parser.configure({
     props: [
       styleTags({
-        Number: t.number,
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon Comma": t.operator,
         "InstructionName FunctionName JumpInstructionName": t.function(t.variableName),
-        "if then elif else end let while do loop break continue device define": t.keyword,
+        "if then elif else end let while do loop break continue device define fn return": t.keyword,
+        Number: t.number,
         String: t.string,
         Device: device,
         Register: register,
         Bool: t.bool,
+        LabelName: t.labelName,
+        Comment: t.comment,
+        VariableName: t.variableName
+      })
+    ]
+  }),
+  languageData: {
+    commentTokens: { line: "#" },
+  }
+});
+
+const lang_ic10 = LRLanguage.define({
+  parser: parser_ic10.configure({
+    props: [
+      styleTags({
+        "InstructionName FunctionName": t.function(t.variableName),
+        "ParenLeft ParenRight": t.operator,
+        Number: t.number,
+        String: t.string,
+        Device: device,
+        Register: register,
         LabelName: t.labelName,
         Comment: t.comment,
         VariableName: t.variableName
@@ -277,6 +299,10 @@ const keymapExtensions = [
     {
       key: "Mod-/",
       run: toggleComment
+    },
+    {
+      key: "Mod-Enter",
+      run: () => { run(); return true; }
     }
   ]),
   EditorView.updateListener.of(update => {
@@ -316,12 +342,19 @@ const keymapExtensions = [
   }),
   EditorView.updateListener.of(update => {
     const view = update.view;
-
     const hasSelection = !view.state.selection.main.empty;
     const isFocused = view.hasFocus;
-
     const hideActiveLine = hasSelection || !isFocused;
+    view.dom.classList.toggle("cm-hide-active-line", hideActiveLine);
+  })
+];
 
+const ic10KeymapExtensions = [
+  EditorView.updateListener.of(update => {
+    const view = update.view;
+    const hasSelection = !view.state.selection.main.empty;
+    const isFocused = view.hasFocus;
+    const hideActiveLine = hasSelection || !isFocused;
     view.dom.classList.toggle("cm-hide-active-line", hideActiveLine);
   })
 ];
@@ -353,11 +386,86 @@ const autosaveExtensions = [
   })
 ];
 
+const customCursorExt = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.dom = document.createElement("div");
+    this.dom.className = "cm-myCursorLayer";
+    Object.assign(this.dom.style, {
+      position: "absolute",
+      inset: "0",
+      pointerEvents: "none",
+    });
+    view.scrollDOM.appendChild(this.dom);
+    this.scheduleDraw(view);
+    this.startBlink();
+  }
+
+  scheduleDraw(view) {
+    view.requestMeasure({
+      read: (view) => {
+        if (!view.hasFocus) return null;
+        const pos = view.state.selection.main.head;
+        const block = view.lineBlockAt(pos);
+        const coords = view.coordsAtPos(pos);
+        if (!coords) return null;
+        return {
+          left: coords.left - view.scrollDOM.getBoundingClientRect().left, // fixed: was contentDOM
+          top: block.top,
+          height: block.height,
+        };
+      },
+      write: (measure) => {
+        this.dom.innerHTML = "";
+        if (!measure) return;
+        const el = document.createElement("div");
+        el.className = "cm-myCursor";
+        Object.assign(el.style, {
+          position: "absolute",
+          left: `${measure.left}px`,
+          top: `${measure.top}px`,
+          height: `${measure.height}px`,
+          width: "2px",
+          background: "#959fb0",
+        });
+        this.dom.appendChild(el);
+      },
+    });
+  }
+
+  update(update) {
+    if (
+      update.docChanged ||
+      update.selectionSet ||
+      update.geometryChanged ||
+      update.focusChanged
+    ) {
+      this.dom.style.visibility = "visible";
+      this.scheduleDraw(update.view);
+      if (update.selectionSet) {
+        this.startBlink();
+      }
+    }
+  }
+
+  startBlink() {
+    clearInterval(this.blinkInterval);
+    this.dom.style.visibility = "visible";
+    this.blinkInterval = setInterval(() => {
+      this.dom.style.visibility =
+        this.dom.style.visibility === "hidden" ? "visible" : "hidden";
+    }, 600);
+  }
+
+  destroy() {
+    clearInterval(this.blinkInterval);
+    this.dom.remove();
+  }
+});
+
 const myCustomExtensions = [
   myCustomThemeExtension,
-  lang,
+  customCursorExt,
   lineNumbers(),
-  drawSelection(),
   highlightActiveLineGutter(),
   highlightActiveLine(),
 ];
@@ -370,13 +478,13 @@ const nonEditable = [
 const editor = new EditorView({
   parent: document.getElementById("editor-container"),
   doc: starterCode,
-  extensions: [...myCustomExtensions, ...keymapExtensions, ...autosaveExtensions, errorOverlayField]
+  extensions: [lang, ...myCustomExtensions, ...keymapExtensions, ...autosaveExtensions, errorOverlayField]
 });
 
 const output = new EditorView({
   parent: document.getElementById("output-container"),
   doc: "",
-  extensions: [...nonEditable, ...myCustomExtensions]
+  extensions: [lang_ic10, ...nonEditable, ...myCustomExtensions, ...ic10KeymapExtensions]
 });
 
 function initListeners() {
@@ -482,9 +590,10 @@ function run() {
       );
 
       errorMessage = error.message;
-      errorLine = getLineNum(error.to);
+      errorLine = getLineNum(error.from);
       forceLinting(editor);
       editor.dispatch({});
+      console.error(error);
     } else {
       console.error(error);
     }
@@ -493,5 +602,6 @@ function run() {
 
 initListeners();
 setup(loadScript, getScript, run);
-// runTests(parser);
-run();
+runTests(parser);
+
+window.editor = editor;

@@ -54,4 +54,9 @@ export const
   _break = 52,
   _continue = 53,
   Jump = 54,
-  JumpInstructionName = 55
+  JumpInstructionName = 55,
+  FunctionDef = 56,
+  fn = 57,
+  FunctionBlock = 58,
+  Return = 59,
+  _return = 60
