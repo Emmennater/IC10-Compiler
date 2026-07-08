@@ -2,22 +2,32 @@ import { transpile } from "./compiler.js";
 import { getAST } from "./helper.js";
 
 const cases = `
-# Order of operations
+# Constant expressions
 let y = 3 + 3
 let x = (2 * 2) + (4 * y)
 let z = 2 + 2 + 1
 
-add r10 3 3
-mul r0 2 2
-mul r1 4 r10
+move r10 6
+mul r0 4 r10
+add r11 4 r0
+move r12 5
+
+# Order of operations
+let y = G.x + G.y
+let x = (2 * G.y) + (G.z * y)
+let z = G.x + G.y + x
+
+add r10 G.x G.y
+mul r0 2 G.y
+mul r1 G.z r10
 add r11 r0 r1
-add r0 2 2
-add r12 r0 1
+add r0 G.x G.y
+add r12 r0 r11
 
 # Positive and negative values
 let x = +1 - -1
 
-sub r10 1 -1
+move r10 2
 
 # Using the stack
 let a = 1
@@ -51,7 +61,7 @@ if true then
   yield
 end
 
-beq 1 0 end1
+beqz 1 end1
 yield
 end1:
 
@@ -65,7 +75,7 @@ end
 move r10 1
 move r11 -1
 add r0 r10 r11
-beq r0 0 end1
+beqz r0 end1
 yield
 end1:
 
@@ -83,12 +93,12 @@ end
 move r10 1
 move r11 -1
 add r0 r10 r11
-beq r0 0 scope2
+beqz r0 scope2
 yield
 j end1
 scope2:
 sub r0 r10 r11
-beq r0 0 scope3
+beqz r0 scope3
 yield
 j end1
 scope3:
@@ -122,7 +132,7 @@ end
 
 l r0 d0 ClearMemory
 seq r0 r0 1
-beq r0 0 end1
+beqz r0 end1
 yield
 end1:
 
@@ -154,8 +164,8 @@ if 1 then
   end
 end
 
-beq 1 0 end1
-beq 2 0 scope3
+beqz 1 end1
+beqz 2 scope3
 yield
 j end2
 scope3:
@@ -185,7 +195,7 @@ loop
 end
 
 scope1:
-beq 1 0 end2
+beqz 1 end2
 j scope1
 end2:
 j scope1
@@ -245,7 +255,7 @@ end
 
 l r0 d0 ClearMemory
 seq r0 r0 0
-beq r0 0 end1
+beqz r0 end1
 yield
 end1:
 
@@ -261,11 +271,49 @@ if (
   1 + 1
 ) > 2 then yield end
 
-add r0 1 1
-sgt r0 r0 2
-beq r0 0 end1
+beqz 0 end1
 yield
 end1:
+
+# While loop
+x = 0
+while x < 10 do
+  yield
+  x = x + 1
+end
+
+move r10 0
+scope1:
+slt r0 r10 10
+beqz r0 end1
+yield
+add r10 r10 1
+j scope1
+end1:
+
+# Repeat until loop
+x = 0
+repeat
+  yield
+  x = x + 1
+until x >= 10
+
+move r10 0
+scope1:
+yield
+add r10 r10 1
+sge r0 r10 10
+beqz r0 scope1
+
+# Increment/decrement operators
+let x = 0
+x++
+let y = --x
+
+move r10 0
+add r10 r10 1
+sub r10 r10 1
+move r11 r10
 `;
 
 const codeExamples = {
@@ -396,7 +444,7 @@ scope2:
 yield
 l r0 larre Idle
 seq r0 r0 1
-beq r0 0 end3
+beqz r0 end3
 j end2
 end3:
 j scope2
@@ -417,7 +465,7 @@ or r0 r0 r1
 ls r1 larre 0 Quantity
 seq r1 r1 stackSize
 or r0 r0 r1
-beq r0 0 end6
+beqz r0 end6
 j end5
 end6:
 s larre Activate 1
@@ -426,27 +474,27 @@ j scope5
 end5:
 sub r11 r11 1
 seq r0 r11 -1
-beq r0 0 end7
+beqz r0 end7
 j end4
 end7:
 j scope4
 end4:
 ls r0 larre 0 Quantity
 sgt r0 r0 0
-beq r0 0 end8
+beqz r0 end8
 s larre Setting dropPos
 jal wait
 s larre Activate 1
 jal wait
 s importBin Open 0
 seq r0 r12 0
-beq r0 0 end9
+beqz r0 end9
 move r13 0
 end9:
 end8:
 j r10
 plant:
-beq r13 0 end10
+beqz r13 end10
 j ra
 end10:
 move r10 ra
@@ -457,7 +505,7 @@ s larre Activate 1
 jal wait
 ls r0 larre 0 Quantity
 seq r0 r0 0
-beq r0 0 end11
+beqz r0 end11
 s vending RequestHash plantName
 sleep 1
 s larre Activate 1
@@ -469,20 +517,20 @@ s larre Setting r11
 jal wait
 ls r0 larre 255 Occupied
 seq r0 r0 0
-beq r0 0 end13
+beqz r0 end13
 s larre Activate 1
 jal wait
 end13:
 sub r11 r11 1
 seq r0 r11 -1
-beq r0 0 end14
+beqz r0 end14
 j end12
 end14:
 j scope12
 end12:
 ls r0 larre 0 Quantity
 sgt r0 r0 0
-beq r0 0 end15
+beqz r0 end15
 s larre Setting dropPos
 jal wait
 s larre Activate 1

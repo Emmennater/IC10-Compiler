@@ -69,6 +69,18 @@ let x = 2 * 2
 ```
 mul r10 2 2
 ```
+Increment/decrement
+```
+let x = 0
+x++
+let y = --x
+```
+```
+move r10 0
+add r10 r10 1
+sub r10 r10 1
+move r11 r10
+```
 ### Booleans
 ```
 x = true
@@ -121,6 +133,19 @@ end
 scope2:
 j scope2
 j scope2
+```
+While loops:
+```
+while true do
+  yield
+end
+```
+Repeat until loops:
+```
+x = 0
+repeat
+  x = x + 1
+until x > 10
 ```
 ### If Statements
 A single if statement:
@@ -260,7 +285,7 @@ Since this high level language is fully backwards compatible with IC10, this mea
 ```
 x = DisplayMode.Seconds
 top:
-sleep(x)
+sleep x
 j top
 ```
 ```
@@ -269,6 +294,11 @@ top:
 sleep r10
 j top
 ```
+Syntax from IC10 that can be written the same way:
+- yield
+- sleep
+- j/jal
+- labels
 ### Supported Operators
 - Addition/Positive: `+`
 - Subtraction/Negative: `-`

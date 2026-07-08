@@ -1,4 +1,4 @@
-@precedence { call, neg, times @left, plus @left, comp @left, and @left, or @left }
+@precedence { call, incdec, neg, times @left, plus @left, comp @left, and @left, or @left }
 
 kw<term> { @specialize<identifier, term> }
 kwn<term> { @specialize[@name={term}]<identifier, term> }
@@ -10,7 +10,7 @@ block { statement* }
 statement {
   Instruction | IfExpr | WhileExpr | LoopExpr | Declaration | DeviceDeclaration |
   Definition | Assignment | Label | kwn<"break"> | kwn<"continue"> | FunctionCall | Jump |
-  FunctionDef | Return
+  FunctionDef | Return | RepeatUntilExpr | IncDecLeft | IncDecRight
 }
 
 If { kwn<"if"> expression kwn<"then"> block }
@@ -22,6 +22,8 @@ Else { kwn<"else"> block }
 IfExpr { If ElseIf* Else? kwn<"end"> }
 
 WhileExpr { kwn<"while"> expression kwn<"do"> block kwn<"end"> }
+
+RepeatUntilExpr { kwn<"repeat"> block kwn<"until"> expression }
 
 LoopExpr { kwn<"loop"> block kwn<"end"> }
 
@@ -40,12 +42,16 @@ LabelName { identifier }
 Label { LabelName Colon }
 
 expression {
-  Parens | Property | Number | UnaryOp | BinaryOp | String | FunctionCall | Bool
+  Parens | Property | Number | UnaryOp | IncDecLeft | IncDecRight | BinaryOp | String | FunctionCall | Bool
 }
 
 Parens { ParenLeft expression ParenRight }
 
-UnaryOp { !neg (AddOp | Negate) expression }
+UnaryOp { (!neg (AddOp | Negate) expression) }
+
+IncDecLeft { UnaryAdd Property }
+
+IncDecRight { Property !incdec UnaryAdd }
 
 BinaryOp {
   expression !times MulOp expression |
@@ -72,9 +78,7 @@ Jump { JumpInstructionName Property }
 
 JumpInstructionName { kw<"j"> | kw<"jal"> }
 
-Instruction { InstructionName }
-
-InstructionName { identifier }
+Instruction { kwn<"yield"> | kwn<"sleep"> expression }
 
 Device { kw<"d0"> | kw<"d1"> | kw<"d2"> | kw<"d3"> | kw<"d4"> | kw<"d5"> | kw<"db"> }
 
@@ -95,6 +99,7 @@ Property { (VariableName | Register | Device) (Dot Property)? }
   space { $[\t \r]+ }
   Number { @digit+ ("." | "." @digit+)? }
   Negate { "!" }
+  UnaryAdd { "++" | "--" }
   MulOp { "*" | "/" }
   AddOp { "+" | "-" }
   CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }

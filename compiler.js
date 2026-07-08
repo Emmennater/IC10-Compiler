@@ -57,7 +57,9 @@ const OP_INSTRUCTIONS = {
   "<": "slt",
   ">": "sgt",
   "&&": "and",
-  "||": "or"
+  "||": "or",
+  "++": "add",
+  "--": "sub",
 };
 
 const DEVICE_REGISTERS = new Set(["d0", "d1", "d2", "d3", "d4", "d5"]);
@@ -67,6 +69,10 @@ const TEMP_REGISTERS = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"];
 function compareRegisters(a, b) {
   // Sort registers by number (descending)
   return -a.localeCompare(b, undefined, { numeric: true });
+}
+
+function round(n) {
+  return Math.round(n * 1e14) / 1e14;
 }
 
 // Need to be able to update dirt registers using the register
@@ -424,7 +430,7 @@ export function transpile(ast, text) {
   // Memory
 
   function freeTemp(expr) {
-    if (expr.type === "VariableName") {
+    if (expr.type === "VariableName" && cache.isTemp(expr.text)) {
       cache.free(expr);
     }
   }
@@ -467,6 +473,7 @@ export function transpile(ast, text) {
   }
 
   function dirty(register) {
+    // NOTE: Register is always a register
     cache.dirty(register);
   }
 
@@ -491,7 +498,40 @@ export function transpile(ast, text) {
     }
     
     let opInstruction = OP_INSTRUCTIONS[op.text];
-    
+
+    // Compile time expression
+    if (left.type === "Number" && right.type === "Number") {
+      let lhs = parseFloat(left.text);
+      let rhs = parseFloat(right.text);
+      let value;
+
+      switch (op.text) {
+      case "+": value = lhs + rhs; break;
+      case "-": value = lhs - rhs; break;
+      case "*": value = lhs * rhs; break;
+      case "/": value = lhs / rhs; break;
+      case ">": value = lhs > rhs; break;
+      case "<": value = lhs < rhs; break;
+      case ">=": value = lhs >= rhs; break;
+      case "<=": value = lhs <= rhs; break;
+      case "==": value = lhs == rhs; break;
+      case "!=": value = lhs != rhs; break;
+      case "&&": value = lhs && rhs; break;
+      case "||": value = lhs || rhs; break;
+      default:
+        throw new CompilerError(`Unknown operator: ${op.text}`);
+      }
+
+      if (outVar) {
+        let register = load(outVar);
+        addInstruction(`move ${register} ${round(value)}`);
+        dirty(register);
+        return outVar;
+      }
+
+      return { type: "Number", text: round(value) };
+    }
+
     // Save result directly to outVar
     if (outVar) {
       let lhs = get(left);
@@ -517,16 +557,11 @@ export function transpile(ast, text) {
     return tempVar;
   }
 
-  function unaryOp(expr, outVar) {
+  function unaryOpLeft(expr, outVar) {
     let op = expr.children[0];
     let operand = expr.children[1];
 
-    // Compute right expression if needed
-    if (operand.type !== "Number" && operand.type !== "Register") {
-      operand = processExpression(operand);
-    }
-
-    // Compute expression
+    // Compile time expression
     if (operand.type === "Number") {
       let value = applyUnaryOp(operand.text, op.text);
 
@@ -541,9 +576,27 @@ export function transpile(ast, text) {
       return value;
     }
 
-    
-    let operandValue = get(operand);
-    freeTemp(operand);
+    let operandExpr = processExpression(operand);
+    let operandValue = get(operandExpr);
+    freeTemp(operandExpr);
+
+    if (op.text === "++" || op.text === "--") {
+      if (operandValue.type !== "Register")
+        throw new CompilerError("Expected operand to be a variable");
+
+      let opInstruction = op.text === "++" ? "add" : "sub";
+
+      addInstruction(`${opInstruction} ${operandValue.text} ${operandValue.text} 1`);
+
+      if (outVar) {
+        let register = load(outVar);
+        addInstruction(`move ${register} ${operandValue.text}`);
+        dirty(register);
+        return outVar;
+      }
+
+      return operandValue;
+    }
 
     if (!outVar) outVar = newTemp();
     let register = load(outVar);
@@ -566,6 +619,33 @@ export function transpile(ast, text) {
     dirty(register);
 
     return outVar;
+  }
+
+  function unaryOpRight(expr, outVar, returnValue = true) {
+    let operand = expr.children[0];
+    let op = expr.children[1];
+
+    let operandExpr = processExpression(operand);
+    let operandValue = get(operandExpr);
+    freeTemp(operandExpr);
+
+    if (op.text === "++" || op.text === "--") {
+      if (operandValue.type !== "Register")
+        throw new CompilerError("Expected operand to be a variable");
+      
+      let opInstruction = op.text === "++" ? "add" : "sub";
+
+      if (returnValue) {
+        if (!outVar) outVar = newTemp();
+        let register = load(outVar);
+        addInstruction(`move ${register} ${operandValue.text}`);
+        dirty(register);
+      }
+
+      addInstruction(`${opInstruction} ${operandValue.text} ${operandValue.text} 1`);
+      
+      return outVar;
+    }
   }
 
   function property(expr, outVar) {
@@ -602,7 +682,7 @@ export function transpile(ast, text) {
 
       // Check if it is already a device
       if (expr.children.length == 1) {
-        return expr.children[0];
+        return { type: "Device", text: device };
       }
 
       if (expr.children[2].children.length !== 1) {
@@ -660,10 +740,10 @@ export function transpile(ast, text) {
       let value = get(varExpr);
       addInstruction(`move ${register} ${value.text}`);
       dirty(register);
-      return value;
+      return varExpr;
     }
     
-    return get(varExpr);
+    return varExpr;
   }
 
   function number(expr, outVar) {
@@ -794,7 +874,7 @@ export function transpile(ast, text) {
       }
     }
 
-    addInstruction(`${functionName} ${args.map(arg => arg.text).join(" ")}`);
+    addInstruction(`${functionName} ${regs.map(regs => regs.text).join(" ")}`);
 
     // Free temporary variables after processing
     for (let arg of args) {
@@ -827,8 +907,12 @@ export function transpile(ast, text) {
       return binaryOp(expr, outVar);
     }
 
-    if (expr.type === "UnaryOp") {
-      return unaryOp(expr, outVar);
+    if (expr.type === "UnaryOp" || expr.type === "IncDecLeft") {
+      return unaryOpLeft(expr, outVar);
+    }
+
+    if (expr.type === "IncDecRight") {
+      return unaryOpRight(expr, outVar);
     }
 
     if (expr.type === "FunctionCall") {
@@ -945,6 +1029,42 @@ export function transpile(ast, text) {
     addInstruction(`end${nextScope.index}:`);
   }
 
+  function whileExpr(statement, scope) {
+    const condition = statement.children[1];
+    const statements = statement.children.slice(3, statement.children.length - 1);
+    const nextScope = createScope(scope);
+
+    nextScope.loopIndex = nextScope.index;
+
+    addInstruction(`scope${nextScope.index}:`);
+    
+    const conditionExpr = processExpression(condition);
+    const conditionReg = get(conditionExpr);
+    
+    freeTemp(conditionExpr);
+    addInstruction(`beqz ${conditionReg.text} end${nextScope.index}`);
+    processStatements(statements, nextScope);
+    addInstruction(`j scope${nextScope.index}`);
+    addInstruction(`end${nextScope.index}:`);
+  }
+
+  function repeatUntilExpr(statement, scope) {
+    const statements = statement.children.slice(1, statement.children.length - 2);
+    const condition = statement.children[statement.children.length - 1];
+    const nextScope = createScope(scope);
+
+    nextScope.loopIndex = nextScope.index;
+
+    addInstruction(`scope${nextScope.index}:`);
+    processStatements(statements, nextScope);
+    
+    const conditionExpr = processExpression(condition);
+    const conditionReg = get(conditionExpr);
+    
+    freeTemp(conditionExpr);
+    addInstruction(`beqz ${conditionReg.text} scope${nextScope.index}`);
+  }
+
   function ifExpr(statement, scope) {
     let ifStatement = statement.children[0];
     let elseIfStatements = [];
@@ -981,7 +1101,7 @@ export function transpile(ast, text) {
       let condition = processExpression(childStatement.children[1]);
       let value = get(condition);
       
-      addInstruction(`beq ${value.text} 0 ${nextLabel}`);
+      addInstruction(`beqz ${value.text} ${nextLabel}`);
       
       // Free temporary registers used for condition
       freeTemp(condition);
@@ -1024,12 +1144,25 @@ export function transpile(ast, text) {
 
   function jump(statement) {
     const istructionName = statement.children[0].text;
-    const label = processExpression(statement.children[1]);
+    const labelExpr = processExpression(statement.children[1]);
+    const label = get(labelExpr);
+
+    freeTemp(labelExpr);
     addInstruction(`${istructionName} ${label.text}`);
   }
 
   function instruction(statement) {
-    addInstruction(statement.text);
+    if (statement.children.length === 1) {
+      addInstruction(statement.text);
+      return;
+    }
+
+    const instructionName = statement.children[0].text;
+    const expr = processExpression(statement.children[1]);
+    const value = get(expr);
+
+    freeTemp(expr);
+    addInstruction(`${instructionName} ${value.text}`);
   }
 
   function processStatement(statement, scope) {
@@ -1049,8 +1182,24 @@ export function transpile(ast, text) {
       return assignment(statement);
     }
 
+    if (statement.type === "IncDecLeft") {
+      return unaryOpLeft(statement);
+    }
+
+    if (statement.type === "IncDecRight") {
+      return unaryOpRight(statement, undefined, false);
+    }
+
     if (statement.type === "LoopExpr") {
       return loopExpr(statement, scope);
+    }
+
+    if (statement.type === "WhileExpr") {
+      return whileExpr(statement, scope);
+    }
+
+    if (statement.type === "RepeatUntilExpr") {
+      return repeatUntilExpr(statement, scope);
     }
 
     if (statement.type === "IfExpr") {

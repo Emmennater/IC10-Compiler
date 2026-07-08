@@ -164,9 +164,11 @@ const lang = LRLanguage.define({
   parser: parser.configure({
     props: [
       styleTags({
-        "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon Comma": t.operator,
-        "InstructionName FunctionName JumpInstructionName": t.function(t.variableName),
-        "if then elif else end let while do loop break continue device define fn return": t.keyword,
+        "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon Comma \
+        UnaryOp UnaryAdd": t.operator,
+        "yield sleep FunctionName JumpInstructionName": t.function(t.variableName),
+        "if then elif else end let while do loop break continue device define fn return \
+        repeat until": t.keyword,
         Number: t.number,
         String: t.string,
         Device: device,
@@ -251,7 +253,7 @@ const keymapExtensions = [
         let indent = (line.text.match(/^\s*/) ?? [""])[0];
 
         // If the line ends with "then", "do", or "else", indent one more level
-        if (/\b(?:then|do|else|loop)\s*$/.test(beforeCursor)) {
+        if (/\b(?:then|do|else|loop|repeat)\s*$/.test(beforeCursor)) {
           indent += "  ";
         }
 
@@ -602,6 +604,6 @@ function run() {
 
 initListeners();
 setup(loadScript, getScript, run);
-runTests(parser);
+// runTests(parser);
 
 window.editor = editor;
