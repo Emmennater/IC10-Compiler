@@ -896,7 +896,7 @@ export function compile(ast, config = {}) {
     return value;
   }
 
-  function userDefinedFunctionCall(expr, outVar) {
+  function userDefinedFunctionCall(expr, outVar, returnValue = true) {
     const functionName = expr.children[0].text;
     const params = [];
     const tempVars = [];
@@ -939,6 +939,8 @@ export function compile(ast, config = {}) {
 
     if (cache.stack.pointer > 0) addInstruction(`sub sp sp ${cache.stack.pointer}`);
 
+    if (!returnValue) return;
+
     if (!outVar) outVar = newTemp();
 
     let register = load(outVar);
@@ -951,16 +953,20 @@ export function compile(ast, config = {}) {
     return outVar;
   }
 
-  function functionCall(expr, outVar) {
+  function functionCall(expr, outVar, returnValue = true) {
     let functionName = expr.children[0].text;
 
     if (definedFns.has(functionName)) {
-      return userDefinedFunctionCall(expr, outVar);
+      return userDefinedFunctionCall(expr, outVar, returnValue);
     }
 
     if (!outVar) outVar = newTemp();
     
     if (functionName === "HASH") {
+      if (!returnValue) {
+        throw new CompilerError("HASH return value must be used");
+      }
+
       let register = load(outVar);  
       addInstruction(`move ${register} ${expr.text}`);
       dirty(register);
@@ -968,6 +974,10 @@ export function compile(ast, config = {}) {
     }
 
     if (functionName === "loadSlot") {
+      if (!returnValue) {
+        throw new CompilerError("loadSlot return value must be used");
+      }
+
       let device = expr.children[2];
       let slot = processExpression(expr.children[4]);
       let attribute = expr.children[6];
@@ -986,6 +996,10 @@ export function compile(ast, config = {}) {
     const batchModes = new Set(["Average", "Sum", "Minimum", "Maximum"]);
 
     if (batchModes.has(functionName)) {
+      if (!returnValue) {
+        throw new CompilerError(`${functionName} return value must be used`);
+      }
+
       // Check if this is a batch operation
       const argument = expr.children[2];
       const idfs = collapseProperty(argument);
@@ -1483,7 +1497,7 @@ export function compile(ast, config = {}) {
     }
 
     if (statement.type === "FunctionCall") {
-      return functionCall(statement);
+      return functionCall(statement, undefined, false);
     }
 
     throw new CompilerError(`Unknown statement: ${statement.type}`);
