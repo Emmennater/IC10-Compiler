@@ -4,6 +4,9 @@
   --cyan-dimmer: #282C34;
   --cyan-dim: #535964;
   --cyan: #7e8797;
+  --grad: radial-gradient(circle at top, #bfeaff, 10%, #95dafd, 50%, #64b7ff);
+  --grad-feint: radial-gradient(circle at top, #bfeaff22, 10%, #95dafd22, 50%, #64b7ff22);
+  --grad-feinter: radial-gradient(circle at top, #bfeaff11, 10%, #95dafd11, 50%, #64b7ff11);
 }
 
 html, body {
@@ -103,11 +106,11 @@ html, body {
   position: relative;
   border: none;
   padding: 3px 14px;
-  background-image: linear-gradient(180deg, #79c0ff10, #d2a8ff10);
+  background-image: var(--grad-feinter)
 }
 
 .options > button:hover {
-  background-image: linear-gradient(180deg, #79c0ff22, #d2a8ff22);
+  background-image: var(--grad-feint);
 }
 
 .options > button:active {
@@ -120,17 +123,17 @@ html, body {
   inset: 0;
   border-radius: inherit;
   padding: 2px;
-  background: linear-gradient(180deg,#79c0ff, #d2a8ff);
+  background: var(--grad);
   -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+    radial-gradient(#fff 0 0) content-box,
+    radial-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
           mask-composite: exclude;
   pointer-events: none;
 }
 
 .options > button > span {
-  background: linear-gradient(180deg, #79c0ff, #d2a8ff);
+  background: var(--grad);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
