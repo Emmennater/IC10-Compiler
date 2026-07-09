@@ -91,22 +91,50 @@ html, body {
 .options > button {
   display: flex;
   justify-content: center;
-  padding: 1px 10px;
+  /* padding: 1px 10px; */
   font-size: 24px;
   font-weight: bold;
   background: #79c0ff18;
-  border: solid 2px #79c0ff88;
+  /* border: solid 2px #79c0ff88; */
   border-radius: 8px;
   color: #79c0ff;
   cursor: pointer;
+
+  position: relative;
+  border: none;
+  padding: 3px 14px;
+  background-image: linear-gradient(180deg, #79c0ff10, #d2a8ff10);
 }
 
 .options > button:hover {
-  background: #79c0ff26;
+  background-image: linear-gradient(180deg, #79c0ff22, #d2a8ff22);
 }
 
 .options > button:active {
   filter: brightness(0.8);
+}
+
+.options > button::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(180deg,#79c0ff, #d2a8ff);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+.options > button > span {
+  background: linear-gradient(180deg, #79c0ff, #d2a8ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .input-wrapper {
