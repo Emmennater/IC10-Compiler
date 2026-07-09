@@ -417,6 +417,15 @@ move r13 r9
 add r8 sp 2
 put db r8 r14
 add r14 r13 r10
+
+# Reading and writing to channels
+device pump = d0
+x = pump:0.Channel0
+d0:0.Channel0 = 1
+
+alias pump d0
+l r10 pump:0 Channel0
+s d0:0 Channel0 1
 `;
 
 const codeExamples = {

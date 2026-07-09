@@ -212,6 +212,17 @@ alias pump d0
 s pump Setting 1
 l r10 pump On
 ```
+Referencing channels can be done similarly
+```
+device pump = d0
+x = pump:0.Channel0
+d0:0.Channel0 = 1
+```
+```
+alias pump d0
+l r10 pump:0 Channel0
+s d0:0 Channel0 1
+```
 ### Using Definitions
 Definitions let you assign a number or a string to an identifier. A list of all aggregator functions (like Sum) can be found [here](#functions).
 ```

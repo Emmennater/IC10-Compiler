@@ -25,7 +25,11 @@ Instruction { InstructionName expression* }
 
 InstructionName { identifier }
 
-Device { kw<"d0"> | kw<"d1"> | kw<"d2"> | kw<"d3"> | kw<"d4"> | kw<"d5"> | kw<"db"> }
+DeviceName { kw<"d0"> | kw<"d1"> | kw<"d2"> | kw<"d3"> | kw<"d4"> | kw<"d5"> | kw<"db"> }
+
+Device { DeviceName Channel? }
+
+Channel { Colon Integer }
 
 Register {
   kw<"r0"> | kw<"r1"> | kw<"r2"> | kw<"r3"> | kw<"r4"> | kw<"r5"> | kw<"r6"> | kw<"r7"> |
@@ -37,6 +41,7 @@ Register {
   identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
   space { $[\t \r]+ }
   Number { @digit+ ("." | "." @digit+)? }
+  Integer { @digit+ }
   Colon { ":" }
   newline { "\n" }
   String { '"' (!["\\] | "\\" _)* '"' }

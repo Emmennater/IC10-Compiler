@@ -12,7 +12,10 @@ export const
   ParenLeft = 10,
   ParenRight = 11,
   Device = 12,
-  Register = 13,
-  Label = 14,
-  LabelName = 15,
-  Colon = 16
+  DeviceName = 13,
+  Channel = 14,
+  Colon = 15,
+  Integer = 16,
+  Register = 17,
+  Label = 18,
+  LabelName = 19

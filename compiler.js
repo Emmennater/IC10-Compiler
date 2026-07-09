@@ -468,13 +468,18 @@ export function compile(ast, config = {}) {
         }
       }
 
-      identifiers.push(identifier);
-      
-      if (expr.children.length === 1) break;
-      
-      expr = expr.children[2];
+      if (expr.children[1] && expr.children[1].type === "Channel") {
+        let deviceTxt = expr.children[0].text + expr.children[1].text;
+        identifiers.push({ type: "Device", text: deviceTxt });
+        expr = expr.children[3];
+      } else {
+        identifiers.push(identifier);
+        expr = expr.children[2];
+      }
 
       idx++;
+
+      if (!expr) break;
     }
 
     return identifiers;
@@ -791,18 +796,24 @@ export function compile(ast, config = {}) {
 
     // Check if variable is a device
     if (devices.has(variableName) || varExpr.type === "Device") {
-      let device = variableName;
+      let device = varExpr.text;
+
+      if (expr.children[1] && expr.children[1].type === "Channel") {
+        device += expr.children[1].text;
+      }
 
       // Check if it is already a device
       if (expr.children.length == 1) {
         return { type: "Device", text: device };
       }
 
-      if (expr.children[2].children.length !== 1) {
+      let property = expr.children[1].type === "Channel" ? expr.children[3] : expr.children[2];
+
+      if (property.children.length !== 1) {
         throw new CompilerError("Expected only one property accessor");
       }
 
-      const attribute = expr.children[2].children[0];
+      const attribute = property.children[0];
       
       if (attribute.type !== "VariableName") {
         throw new CompilerError("Expected attribute to be a variable name");

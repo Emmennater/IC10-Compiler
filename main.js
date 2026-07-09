@@ -164,12 +164,13 @@ const lang = LRLanguage.define({
     props: [
       styleTags({
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign Dot Colon Comma \
-        UnaryOp UnaryAdd": t.operator,
+        UnaryOp UnaryAdd ChannelColon": t.operator,
         "yield sleep FunctionName JumpInstructionName": t.function(t.variableName),
         "if then elif else end let while do loop break continue device define fn return \
         repeat until": t.keyword,
-        Number: t.number,
+        "Number Integer": t.number,
         String: t.string,
+        Channel: device,
         Device: device,
         Register: register,
         Bool: t.bool,
@@ -189,10 +190,11 @@ const lang_ic10 = LRLanguage.define({
     props: [
       styleTags({
         "InstructionName FunctionName": t.function(t.variableName),
-        "ParenLeft ParenRight": t.operator,
-        Number: t.number,
+        "ParenLeft ParenRight Colon": t.operator,
+        "Number Integer": t.number,
         String: t.string,
-        Device: device,
+        Channel: device,
+        DeviceName: device,
         Register: register,
         LabelName: t.labelName,
         Comment: t.comment,
