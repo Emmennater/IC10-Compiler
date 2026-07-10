@@ -37,17 +37,20 @@ The bottom example is the compiled output in `IC10`.
 - [Supported Operators](#supported-operators)
 
 ### Declaring Variables
-`let` is used to define variables and does not require an initial value. `numbers` are the only thing that can be assigned to variables. `strings` will be automatically hashed. Registers 10-15 are used for variables.
+`let` is used to define variables and does not require an initial value. `numbers` are the only thing that can be assigned to variables. `strings` will be automatically hashed. `labels` will turn into line numbers. Registers 10-15 are used for variables.
 ```
+top:
 let pi
 let y = -2
 pi = 3.14
 let s = "Hello World!"
+let z = top
 ```
 ```
 move r11 -2
 move r10 3.14
 move r12 HASH("Hello World!")
+move z 0
 ```
 You can still technically use all the registers, but this may interfere with how variables are used by the compiler *(not recommended)*.
 #### Variable Scopes
@@ -299,7 +302,6 @@ move r10 HelloWorld
 ### Calling Functions
 Aggregator functions:
 - Average, Sum, Minimum, Maximum
-Everything else is converted directly into an IC10 instruction.
 ```
 # Take the average of a logic type for a device group
 let x = Average(deviceHash.LogicType) # (deviceHash.logicType)
@@ -308,7 +310,8 @@ let x = Average(deviceHash.LogicType) # (deviceHash.logicType)
 lb r10 HASH("deviceHash") LogicType Average
 ```
 String parameters can be used to specify an IC10 variable.
-loadSlot is unique in that the return value can be assigned to a variable directly without using a parameter.
+Assigning an ic10 function to a parameter assumes that the return value is the first argument.
+I think this is true for all instructions but not sure!
 ```
 # Load the quantity at slot 0 for device d0
 let y = loadSlot(d0, 0, Quantity) # (device, slot index, logic type)

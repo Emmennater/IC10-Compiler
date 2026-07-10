@@ -133,8 +133,7 @@ if d0.ClearMemory == 1 then
 end
 
 l r0 d0 ClearMemory
-seq r0 r0 1
-beqz r0 end1
+bne r0 1 end1
 yield
 end1:
 
@@ -256,8 +255,7 @@ if !d0.ClearMemory then
 end
 
 l r0 d0 ClearMemory
-seq r0 r0 0
-beqz r0 end1
+bnez r0 end1
 yield
 end1:
 
@@ -286,8 +284,7 @@ end
 
 move r10 0
 scope1:
-slt r0 r10 10
-beqz r0 end1
+bge r10 10 end1
 yield
 add r10 r10 1
 j scope1
@@ -304,8 +301,7 @@ move r10 0
 scope1:
 yield
 add r10 r10 1
-sge r0 r10 10
-beqz r0 scope1
+blt r10 10 scope1
 
 # Increment/decrement operators
 let x = 0
@@ -559,8 +555,7 @@ wait:
 scope2:
 yield
 l r0 larre Idle
-seq r0 r0 1
-beqz r0 end3
+bne r0 1 end3
 j end2
 end3:
 j scope2
@@ -589,22 +584,19 @@ jal wait
 j scope5
 end5:
 sub r11 r11 1
-seq r0 r11 -1
-beqz r0 end7
+bne r11 -1 end7
 j end4
 end7:
 j scope4
 end4:
 ls r0 larre 0 Quantity
-sgt r0 r0 0
-beqz r0 end8
+blez r0 end8
 s larre Setting dropPos
 jal wait
 s larre Activate 1
 jal wait
 s importBin Open 0
-seq r0 r12 0
-beqz r0 end9
+bnez r12 end9
 move r13 0
 end9:
 end8:
@@ -620,8 +612,7 @@ jal wait
 s larre Activate 1
 jal wait
 ls r0 larre 0 Quantity
-seq r0 r0 0
-beqz r0 end11
+bnez r0 end11
 s vending RequestHash plantName
 sleep 1
 s larre Activate 1
@@ -632,21 +623,18 @@ scope12:
 s larre Setting r11
 jal wait
 ls r0 larre 255 Occupied
-seq r0 r0 0
-beqz r0 end13
+bnez r0 end13
 s larre Activate 1
 jal wait
 end13:
 sub r11 r11 1
-seq r0 r11 -1
-beqz r0 end14
+bne r11 -1 end14
 j end12
 end14:
 j scope12
 end12:
 ls r0 larre 0 Quantity
-sgt r0 r0 0
-beqz r0 end15
+blez r0 end15
 s larre Setting dropPos
 jal wait
 s larre Activate 1

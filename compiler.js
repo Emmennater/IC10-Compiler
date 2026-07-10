@@ -411,6 +411,11 @@ class Cache {
 // and stepOut subroutines to the top with a jump
 // to skip them
 
+// TODO:
+// For functions that don't use all of the available
+// variables, don't push old variables to the stack
+// Instead, keep them and just jump to the function.
+
 export function compile(ast, config = {}) {
   let gen = "";
   let prependGen = "";
@@ -464,6 +469,16 @@ export function compile(ast, config = {}) {
     for (let instruction of instructions) {
       addInstruction(instruction);
     }
+  }
+
+  function lastInstruction() {
+    let idx = gen.lastIndexOf("\n", gen.length - 2);
+    return gen.substring(idx + 1, gen.length - 1);
+  }
+
+  function replaceLastInstruction(instruction) {
+    let idx = gen.lastIndexOf("\n", gen.length - 2);
+    gen = gen.substring(0, idx + 1) + instruction + "\n";
   }
 
   function prependEnabled(prepend) {
@@ -643,6 +658,53 @@ export function compile(ast, config = {}) {
   }
 
   // Expressions
+
+  function processBranchCondition(expr, isMet, jumpLabel) {
+    const result = processExpression(expr);
+    const last = lastInstruction();
+    let parts = last.split(" ");
+    let op = parts[0];
+
+    if (!isMet) {
+      // Find the negation of the condition
+      switch (op) {
+      case "sgt": op = "sle"; break;
+      case "slt": op = "sge"; break;
+      case "sge": op = "slt"; break;
+      case "sle": op = "sgt"; break;
+      case "seq": op = "sne"; break;
+      case "sne": op = "seq"; break;
+      }
+    }
+
+    // If the op is not recognized, then branch normally
+    const knownOps = new Set(["sgt", "slt", "sge", "sle", "seq", "sne"]);
+    if (!knownOps.has(op)) {
+      const resultValue = get(result);
+      addInstruction(`beqz ${resultValue.text} ${jumpLabel}`);
+      freeTemp(result);
+      return;
+    }
+
+    let branchOp = `b${op.slice(1)}`;
+    let left = parts[2];
+    let right = parts[3];
+
+    if (left === "0") {
+      branchOp += "z";
+      parts = [branchOp, parts[3], jumpLabel];
+    } else if (right === "0") {
+      branchOp += "z";
+      parts = [branchOp, parts[2], jumpLabel];
+    } else {
+      branchOp = `b${op.slice(1)}`;
+      parts = [branchOp, parts[2], parts[3], jumpLabel];
+    }
+    
+    const newInstruction = parts.join(" ");
+    replaceLastInstruction(newInstruction);
+    freeTemp(result);
+  }
 
   function binaryOp(expr, outVar) {
     let left = expr.children[0];
@@ -1048,22 +1110,7 @@ export function compile(ast, config = {}) {
       return outVar;
     }
 
-    if (functionName === "loadSlot") {
-      if (!returnValue) {
-        throw new CompilerError("loadSlot return value must be used");
-      }
-
-      let device = expr.children[2];
-      let slot = processExpression(expr.children[4]);
-      let attribute = expr.children[6];
-
-      freeTemp(slot);
-      let register = load(outVar);
-      addInstruction(`ls ${register} ${device.text} ${slot.text} ${attribute.text}`);
-      dirty(register);
-
-      return outVar;
-    }
+    if (functionName === "loadSlot") functionName = "ls";
 
     // Convert setSlot to ss (alias)
     if (functionName === "setSlot") functionName = "ss";
@@ -1121,19 +1168,20 @@ export function compile(ast, config = {}) {
       regs.push(get(arg));
     }
 
-    // Remove quotes from strings
-    for (let arg of args) {
-      if (arg.type === "String") {
-        arg.text = arg.text.slice(1, arg.text.length - 1);
-      }
-    }
-
-    addInstruction(`${functionName} ${regs.map(regs => regs.text).join(" ")}`);
-
     // Free temporary variables after processing
     for (let arg of args) {
       freeTemp(arg);
     }
+
+    if (outVar && returnValue) {
+      const register = load(outVar);
+      addInstruction(`${functionName} ${register} ${regs.map(regs => regs.text).join(" ")}`);
+      dirty(register);
+    } else {
+      addInstruction(`${functionName} ${regs.map(regs => regs.text).join(" ")}`);
+    }
+
+    return outVar;
   }
 
   function processExpression(expr, outVar) {
@@ -1326,7 +1374,7 @@ export function compile(ast, config = {}) {
       let value = get(retExpr);
 
       addInstruction(`s ${device.text} ${attributeName} ${value.text}`);
-      freeTemp(value);
+      freeTemp(retExpr);
     } else {
       // Batch setting device attributes
       let retExpr = processExpression(statement.children[2]);
@@ -1340,7 +1388,7 @@ export function compile(ast, config = {}) {
 
       if (idfs.length === 2) {
         addInstruction(`sb ${x0} ${x1} ${value.text}`);
-        freeTemp(value);
+        freeTemp(retExpr);
       } else if (idfs.length === 3) {
         let x2 = idfs[2].text;
 
@@ -1349,7 +1397,7 @@ export function compile(ast, config = {}) {
         }
 
         addInstruction(`sbn ${x0} ${x1} ${x2} ${value.text}`);
-        freeTemp(value);
+        freeTemp(retExpr);
       }
     }
   }
@@ -1378,11 +1426,7 @@ export function compile(ast, config = {}) {
 
     addInstruction(`scope${nextScope.index}:`);
     
-    const conditionExpr = processExpression(condition);
-    const conditionReg = get(conditionExpr);
-    
-    freeTemp(conditionExpr);
-    addInstruction(`beqz ${conditionReg.text} end${nextScope.index}`);
+    processBranchCondition(condition, false, `end${nextScope.index}`);
     processStatements(statements, nextScope);
     addInstruction(`j scope${nextScope.index}`);
     addInstruction(`end${nextScope.index}:`);
@@ -1399,13 +1443,7 @@ export function compile(ast, config = {}) {
 
     addInstruction(`scope${nextScope.index}:`);
     processStatements(statements, nextScope);
-    
-    const conditionExpr = processExpression(condition);
-    const conditionReg = get(conditionExpr);
-    
-    freeTemp(conditionExpr);
-    addInstruction(`beqz ${conditionReg.text} scope${nextScope.index}`);
-
+    processBranchCondition(condition, false, `scope${nextScope.index}`);
     deleteScope(nextScope);
   }
 
@@ -1445,14 +1483,7 @@ export function compile(ast, config = {}) {
       }
 
       // If/ElseIf clause
-      let condition = processExpression(childStatement.children[1]);
-      let value = get(condition);
-      
-      addInstruction(`beqz ${value.text} ${nextLabel}`);
-      
-      // Free temporary registers used for condition
-      freeTemp(condition);
-      
+      processBranchCondition(childStatement.children[1], false, nextLabel);
       processStatements(childStatement.children.slice(3), currentScope);
       
       if (statement.children[i + 1].type === "end") {
@@ -1470,6 +1501,8 @@ export function compile(ast, config = {}) {
   }
 
   function deviceDeclaration(statement) {
+    // This could technically be removed, but it exists
+    // to make the script easier to use
     const variableName = statement.children[1].text;
     const deviceRegister = statement.children[3].text;
     addInstruction(`alias ${variableName} ${deviceRegister}`);
