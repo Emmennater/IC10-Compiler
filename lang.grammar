@@ -1,0 +1,40 @@
+@precedence { neg, times @left, plus @left }
+
+kw<term> { @specialize[@name={term}]<identifier, term> }
+
+@top program { block }
+
+block { statement* }
+
+statement { Declaration | Assignment }
+
+Declaration { kw<"let"> VariableName (Assign expression)? }
+
+Assignment { VariableName Assign expression }
+
+expression { Number | VariableName | Parens | UnaryOp | BinaryOp }
+
+VariableName { identifier }
+
+Parens { ParenLeft expression ParenRight }
+
+UnaryOp { !neg AddOp expression }
+
+BinaryOp {
+  expression !times MulOp expression |
+  expression !plus AddOp expression
+}
+
+@tokens {
+  identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
+  spaces { @whitespace }
+  Number { @digit+ ("." | "." @digit+)? }
+  MulOp { "*" | "/" }
+  AddOp { "+" | "-" }
+  Assign { "=" }
+  ParenLeft { "(" }
+  ParenRight { ")" }
+  Comment { "#" ![\n]* }
+}
+
+@skip { spaces | Comment }
