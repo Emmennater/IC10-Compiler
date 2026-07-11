@@ -1,18 +1,27 @@
-@precedence { neg, times @left, plus @left }
+@precedence { neg, times @left, plus @left, comp @left, and @left, or @left }
 
 kw<term> { @specialize[@name={term}]<identifier, term> }
+kw_<term> { @specialize<identifier, term> }
 
 @top program { block }
 
 block { statement* }
 
-statement { Declaration | Assignment }
+statement { Declaration | Assignment | IfExpr }
 
 Declaration { kw<"let"> VariableName (Assign expression)? }
 
 Assignment { VariableName Assign expression }
 
-expression { Number | VariableName | Parens | UnaryOp | BinaryOp }
+If { kw<"if"> expression kw<"then"> block }
+
+ElseIf { kw<"elif"> expression kw<"then"> block }
+
+Else { kw<"else"> block }
+
+IfExpr { If ElseIf* Else? kw<"end"> }
+
+expression { Number | Bool | VariableName | Parens | UnaryOp | BinaryOp }
 
 VariableName { identifier }
 
@@ -22,8 +31,13 @@ UnaryOp { !neg AddOp expression }
 
 BinaryOp {
   expression !times MulOp expression |
-  expression !plus AddOp expression
+  expression !plus AddOp expression |
+  expression !comp CompareOp expression |
+  expression !and LogicAnd expression |
+  expression !or LogicOr expression
 }
+
+Bool { kw_<"true"> | kw_<"false"> }
 
 @tokens {
   identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
@@ -31,6 +45,9 @@ BinaryOp {
   Number { @digit+ ("." | "." @digit+)? }
   MulOp { "*" | "/" }
   AddOp { "+" | "-" }
+  CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+  LogicAnd { "&&" }
+  LogicOr { "||" }
   Assign { "=" }
   ParenLeft { "(" }
   ParenRight { ")" }

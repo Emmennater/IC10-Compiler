@@ -20,7 +20,7 @@ The bottom example is the compiled output in `IC10`.
 - [Supported Operators](#supported-operators)
 
 ### Declaring Variables
-`let` is used to define variables and does not require an initial value. `numbers` are the only thing that can be assigned to variables. `strings` will be automatically hashed. `labels` will turn into line numbers. Registers 10-15 are used for variables.
+`let` is used to define variables and does not require an initial value. `numbers` are the only thing that can be assigned to variables. `strings` will be automatically hashed. `labels` will turn into line numbers. Variables are assigned to registers starting at `r10` up to `r15`, then continuing from `r9` counting down — every register the compiler doesn't need for temporary calculations is available for variables. If you run out of registers entirely, the least-used variables are automatically moved to stack memory (fixed addresses counting down from 511), which costs one extra line per read (`get`) or write (`poke`).
 ```
 top:
 let pi
