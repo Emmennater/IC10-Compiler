@@ -217,8 +217,8 @@ l r10 pump On
 Referencing channels can be done similarly
 ```
 device pump = d0
-let x = pump:0.Channel0
-d0:0.Channel0 = 1
+let x = pump[0].Channel0
+d0[0].Channel0 = 1
 ```
 ```
 alias pump d0
@@ -255,10 +255,10 @@ Reading from and writing to devices with specific names
 define light = "StructureWallLight"
 
 # Count how many lights are on inside
-let x = Sum(light.Inside.On)
+let x = Sum(light["Inside"].On)
 
 # Turn on all the lights inside
-light.Inside.On = true
+light["Inside"].On = true
 ```
 ```
 define light HASH("StructureWallLight")

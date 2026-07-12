@@ -4,6 +4,7 @@ html, body {
   padding: 0;
   width: 100%;
   height: 100%;
+  /* overflow: hidden; */
 }
 
 h1 {
@@ -31,15 +32,19 @@ h1 {
   color: #ff6b6b;
 }
 
+.panel {
+  overflow: hidden;
+}
+
 .editor {
-  flex: 1;
   width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
-#editor {
-  border-bottom: 1px solid #535964;
+#ic10-wrapper {
+  flex: 0.7;
+  border-left: 1px solid #535964;
 }
 
 hbox {
@@ -47,6 +52,7 @@ hbox {
   display: flex;
   align-items: center;
   width: 100%;
+  min-width: 0;
 }
 
 vbox {
@@ -55,4 +61,5 @@ vbox {
   flex-direction: column;
   align-items: center;
   height: 100%;
+  min-width: 0;
 }

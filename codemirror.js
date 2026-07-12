@@ -120,13 +120,15 @@ const lang = LRLanguage.define({
     props: [
       styleTags({
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign UnaryOp \
-        UnaryAdd": t.operator,
-        "let if then elif else end loop while do repeat until break continue": t.keyword,
-        "Instruction": t.function(t.variableName),
-        Number: t.number,
+        UnaryAdd BracketLeft BracketRight Dot": t.operator,
+        "let if then elif else end loop while do repeat until break continue define device": t.keyword,
+        "Instruction FunctionName": t.function(t.variableName),
+        "Number Integer": t.number,
         Bool: t.bool,
         Comment: t.comment,
-        VariableName: t.variableName
+        String: t.string,
+        VariableName: t.variableName,
+        Device: device
       })
     ]
   }),

@@ -25,6 +25,7 @@
     "@codemirror/view": "^6.43.6",
     "@lezer/generator": "^1.8.0",
     "@lezer/highlight": "^1.2.3",
+    "@lezer/lr": "^1.4.10",
     "codemirror": "^6.0.2"
   }
 }

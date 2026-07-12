@@ -593,8 +593,9 @@ const cases = {
       "j loop0"
     ]
   },
-  "stack allocation in loops (not enough registers + can't optimize order)": {
-    // Here, a read of y5 disrupts the ability to set y3 before calculating y4.
+  "stack allocation in loops (not enough registers + saving placeholder to optimize order)": {
+    // Here, a read of y5 disrupts the ability to set y3 before calculating y5.
+    // You don't need to calculate x4, just save y5 before setting y3.
     source: [
       "let x0 = y0",
       "let x1 = y1",

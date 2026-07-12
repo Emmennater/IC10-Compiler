@@ -1371,7 +1371,10 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     let nextSpillAddr = STACK_TOP;
     let storesSunk = false;
 
-    for (;;) {
+    // Repeatedly spill registers based on number of uses, breaking ties
+    // by choosing the variable that blocks its register the longest.
+    // Once all registers can be assigned, emit the program.
+    while (true) {
       const { end, useCount } = computeRanges(program);
 
       const regOf = new Map<number, number>();
@@ -1495,7 +1498,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
   }
 
   let program: Inst[] = instructions;
-  for (;;) {
+  while (true) {
     program = eliminateDeadCode(program);
     const next =
       simplifyBranches(program) ??

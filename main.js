@@ -13,6 +13,7 @@ function run() {
   let ic10;
   try {
     let ast = getAST(txt);
+    console.log(ast);
     ic10 = compile(ast);
   } catch (e) {
     if (e instanceof CompileError) {

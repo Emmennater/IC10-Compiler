@@ -1,4 +1,4 @@
-@precedence { neg, times @left, plus @left, comp @left, and @left, or @left }
+@precedence { call, neg, times @left, plus @left, comp @left, and @left, or @left }
 
 kw<term> { @specialize[@name={term}]<identifier, term> }
 kw_<term> { @specialize<identifier, term> }
@@ -9,12 +9,16 @@ block { statement* }
 
 statement {
   Declaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
-  kw<"break"> | kw<"continue"> | Instruction
+  kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition
 }
 
 Declaration { kw<"let"> VariableName (Assign expression)? }
 
-Assignment { VariableName Assign expression }
+DeviceDeclaration { kw<"device"> VariableName Assign Device }
+
+Definition { kw<"define"> VariableName Assign expression }
+
+Assignment { (VariableName | DeviceProperty | DeviceChannelProperty | DeviceNameProperty) Assign expression }
 
 If { kw<"if"> expression kw<"then"> block }
 
@@ -32,9 +36,20 @@ RepeatUntilExpr { kw<"repeat"> block kw<"until"> expression }
 
 Instruction { kw_<"yield"> | kw_<"sleep"> expression }
 
-expression { Number | Bool | VariableName | Parens | UnaryOp | BinaryOp }
+FunctionCall { FunctionName !call ParenLeft expression (Comma expression)* ParenRight }
+
+expression { Number | Bool | VariableName | DeviceProperty | DeviceChannelProperty |
+  DeviceNameProperty | Parens | UnaryOp | BinaryOp | FunctionCall | String }
 
 VariableName { identifier }
+
+FunctionName { identifier }
+
+DeviceProperty { VariableName Dot VariableName }
+
+DeviceChannelProperty { VariableName BracketLeft Integer BracketRight Dot VariableName }
+
+DeviceNameProperty { VariableName BracketLeft (String | VariableName) BracketRight Dot VariableName }
 
 Parens { ParenLeft expression ParenRight }
 
@@ -48,12 +63,15 @@ BinaryOp {
   expression !or LogicOr expression
 }
 
+Device { kw_<"d0"> | kw_<"d1"> | kw_<"d2"> | kw_<"d3"> | kw_<"d4"> | kw_<"d5"> | kw_<"db"> }
+
 Bool { kw_<"true"> | kw_<"false"> }
 
 @tokens {
   identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
   spaces { @whitespace }
   Number { @digit+ ("." | "." @digit+)? }
+  Integer { @digit+ }
   MulOp { "*" | "/" }
   AddOp { "+" | "-" }
   CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
@@ -62,6 +80,11 @@ Bool { kw_<"true"> | kw_<"false"> }
   Assign { "=" }
   ParenLeft { "(" }
   ParenRight { ")" }
+  BracketLeft { "[" }
+  BracketRight { "]" }
+  Dot { "." }
+  Comma { "," }
+  String { '"' (!["\\] | "\\" _)* '"' }
   Comment { "#" ![\n]* }
 }
 
