@@ -381,12 +381,13 @@ const cases = {
       "end",
     ],
     expected: [
-      "loop0",
+      "loop0:",
       "yield",
+      "move r0 a", // The condition must load the placeholder first
       "blez r0 loop0", // Back to start of loop
       "move r0 a",
       "move b r0",
-      "j loop0"    
+      "j loop0"
     ]
   },
   "compacting if statements in loops with continue (if statement is not just continue)": {
@@ -401,15 +402,16 @@ const cases = {
       "end",
     ],
     expected: [
-      "loop0",
+      "loop0:",
       "yield",
+      "move r0 a", // The condition must load the placeholder first
       "bgtz r0 endif0",
       "move b 0", // Update b before continuing
-      "j endif0",
+      "j loop0", // The continue goes back to the loop start
       "endif0:",
       "move r0 a",
       "move b r0",
-      "j loop0"    
+      "j loop0"
     ]
   },
   "compacting if statements in loops with break (if statement is just break)": {
@@ -423,8 +425,9 @@ const cases = {
       "end",
     ],
     expected: [
-      "loop0",
+      "loop0:",
       "yield",
+      "move r0 a", // The condition must load the placeholder first
       "blez r0 endloop0",
       "move r0 a",
       "move b r0",
@@ -444,8 +447,9 @@ const cases = {
       "end",
     ],
     expected: [
-      "loop0",
+      "loop0:",
       "yield",
+      "move r0 a", // The condition must load the placeholder first
       "bgtz r0 endif0",
       "move b 0", // Update b before breaking
       "j endloop0",
@@ -552,7 +556,7 @@ const cases = {
       "move r0 c",
       "move a r0",
       "add r1 r0 1", // r0 will be used in the future
-      "move b r0",
+      "move b r1", // y lives in r1
       "move d r0",
     ]
   },
@@ -602,24 +606,23 @@ const cases = {
       "  y4 = x4",
       "end",
     ],
-    // The pressure of the program is 5 and the minimum number of temp registers is 2.
-    // It is a tie between x0, x1, and x2 for use as temporaries (use last two).
+    // The store of y3 can still sink below the y5 read (source order of
+    // placeholder accesses is read y5, write y3, write y4), which frees x3's
+    // register before x4 is computed. x1 and x2 spill; x0 keeps r0.
     expected: [
       "move r0 y0",
       "move r1 y1",
-      "move r2 y2",
-      "poke 511 r1", // Save x1 but don't free r1
-      "poke 510 r2", // Save x2 and free r2
+      "poke 510 r1", // Save x1 and free r1
+      "move r1 y2",
+      "poke 511 r1", // Save x2 and free r1
       "loop0:", // (r0, r1, r2) = (x0, temp, temp)
-      "add r1 r0 r1", // r1 = x0 + x1
-      "poke 509 r1", // Save x3 and free r1
-      "get r1 db 510", // r1 = x2
+      "get r1 db 510", // r1 = x1
+      "add r1 r0 r1", // r1 = x3 = x0 + x1
       "move r2 y5", // r2 = y5
-      "add r1 r0 r2", // r1 = x2 + y5
-      "get r2 db 509", // r2 = x3
-      "move y3 r2", // r2 is now free
-      "move y4 r1", // r1 is now free
-      "get r1 db 511", // r1 = x1
+      "move y3 r1", // r1 is now free
+      "get r1 db 511", // r1 = x2
+      "add r1 r1 r2", // r1 = x4 = x2 + y5
+      "move y4 r1",
       "j loop0"
     ]
   },

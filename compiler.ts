@@ -12,22 +12,28 @@
  *      Placeholder identifiers (anything not declared with `let`) are read
  *      and written only through `move` — they stand in for the l/s/lb/sb/...
  *      device instructions to come, which cannot appear as ALU operands.
- *      If conditions compile to fused branches (ble/bgez/bnez/...) that jump
- *      when the condition is FALSE; && and || short-circuit. A variable
- *      assigned inside a branch is demoted to a "home" vreg for the duration
- *      of the if: every path writes the same vreg, so the merge needs no phi.
- *      Constant conditions skip the branch entirely and lower one arm inline.
- *   2. Dead code elimination walks the IR backwards (merging liveness at
- *      labels), keeping only instructions that contribute to a side effect
- *      (a placeholder write). A branch-simplification pass then deletes ifs
- *      whose arms are all empty and inverts branches over empty then-arms;
- *      the two passes repeat until nothing changes.
+ *      If/loop conditions compile to fused branches (ble/bgez/bnez/...);
+ *      && and || short-circuit. A variable assigned inside a branch or loop
+ *      body is demoted to a "home" vreg: every path writes the same vreg,
+ *      so merge points and back edges need no phis. Inside a loop body the
+ *      variable's compile-time constant is forgotten (the back edge may
+ *      change it); constant conditions skip branches entirely.
+ *   2. Dead code elimination uses iterative backward liveness (loops have
+ *      backward branches, so label live-sets must reach a fixed point),
+ *      keeping only instructions that contribute to a side effect (a
+ *      placeholder write, yield, or sleep). Control-flow cleanup passes
+ *      alternate with it: ifs with all-empty arms disappear, a then-arm
+ *      that is exactly `break`/`continue` fuses into the conditional
+ *      branch, code after an unconditional jump is unreachable, jumps to
+ *      the next label vanish, and loops with empty bodies are pruned.
  *   3. Linear-scan register allocation maps virtual registers onto
- *      VAR_REGISTER_ORDER, reusing a register as soon as its value dies.
- *      When pressure exceeds the pool, the least-used value is spilled to a
- *      fixed stack address (511 downward: `get r? db addr` to read,
- *      `poke addr value` to write) and allocation is retried. Low stack
- *      addresses are left free for the future function call stack.
+ *      VAR_REGISTER_ORDER using live ranges from the same dataflow (a value
+ *      used before the back edge stays live to the end of the loop). Under
+ *      pressure, placeholder stores are first sunk earlier (their order
+ *      among placeholder accesses is preserved) to shorten live ranges;
+ *      remaining pressure spills the least-used value to a fixed stack
+ *      address (511 downward: `get r? db addr` / `poke addr value`). Low
+ *      stack addresses are left free for the future function call stack.
  *
  *   r16 (sp) and r17 (ra) are reserved for stack and function support.
  */
@@ -53,7 +59,8 @@ export class CompileError extends Error {
 
 
 // Preferred assignment order for variable registers
-const VAR_REGISTER_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+// const VAR_REGISTER_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+const VAR_REGISTER_ORDER = [0, 1, 2];
 
 // Spilled values live at fixed stack addresses growing down from here
 const STACK_TOP = 511;
@@ -83,7 +90,7 @@ const MIRROR: Record<string, string> = {
   "==": "==", "!=": "!=", ">": "<", "<": ">", ">=": "<=", "<=": ">=",
 };
 
-// Flip a branch to jump on the opposite outcome (for empty-then inversion)
+// Flip a branch to jump on the opposite outcome
 const INVERT_BRANCH: Record<string, string> = {
   beq: "bne", bne: "beq", bgt: "ble", ble: "bgt", blt: "bge", bge: "blt",
   beqz: "bnez", bnez: "beqz", bgtz: "blez", blez: "bgtz", bltz: "bgez", bgez: "bltz",
@@ -96,12 +103,15 @@ const COMPARE_JS: Record<string, (a: number, b: number) => boolean> = {
 };
 
 const EXPRESSION_TYPES = new Set(["Number", "Bool", "VariableName", "Parens", "UnaryOp", "BinaryOp"]);
-const STATEMENT_TYPES = new Set(["Declaration", "Assignment", "IfExpr"]);
+const STATEMENT_TYPES = new Set([
+  "Declaration", "Assignment", "IfExpr", "LoopExpr", "WhileExpr", "RepeatUntilExpr",
+  "break", "continue", "Instruction",
+]);
 
-type Operand =
-  | { kind: "vreg"; id: number }
-  | { kind: "const"; text: string }
-  | { kind: "name"; text: string };
+type VRegOperand = { kind: "vreg"; id: number };
+type ConstOperand = { kind: "const"; text: string };
+type NameOperand = { kind: "name"; text: string };
+type Operand = VRegOperand | ConstOperand | NameOperand;
 
 type Inst =
   | { id: number; op: "alu"; opcode: string; dest: number; args: Operand[]; node: SyntaxNode }
@@ -110,32 +120,44 @@ type Inst =
   | { id: number; op: "storename"; name: string; src: Operand; node: SyntaxNode }
   | { id: number; op: "get"; dest: number; addr: number; node: SyntaxNode }
   | { id: number; op: "poke"; addr: number; src: Operand; node: SyntaxNode }
+  | { id: number; op: "raw"; opcode: string; args: Operand[]; node: SyntaxNode }
   | { id: number; op: "label"; name: string; node: SyntaxNode }
   | { id: number; op: "jump"; target: string; node: SyntaxNode }
   | { id: number; op: "branch"; opcode: string; args: Operand[]; target: string; node: SyntaxNode };
+
+// Omit that distributes over a union instead of collapsing it
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /** One variable's compile-time state. */
 type VarState = {
   value: Operand | null; // null = unassigned so far
   maybe: boolean;        // assigned on some control-flow paths but not all
-  home: number | null;   // while inside an if that assigns this variable,
+  home: number | null;   // while inside an if/loop that assigns this variable,
                          // every write also lands in this vreg
 };
 
 /** Metadata for one lowered if/elif/else, used by branch simplification. */
-type Region = {
+type IfRegion = {
   arms: {
     condIds: number[];        // everything emitted for the condition
     branchIds: number[];      // just the conditional branches
     bodyFrom: number;         // inclusive inst-id range of the arm body
     bodyTo: number;
     jumpId: number | null;    // the `j endif` after the body
-    labelName: string | null; // label that starts this arm (null for the first)
+    labelName: string | null; // label that starts the NEXT arm
     labelId: number | null;
   }[];
   endLabelName: string;
   endLabelId: number;
-  simplified?: boolean; // two-arm transforms are one-shot
+  simplified?: boolean;       // structural transforms are one-shot
+};
+
+/** Metadata for one lowered loop, used to prune empty loops. */
+type LoopRegion = {
+  headLabelId: number;
+  backJumpId: number;
+  bodyFrom: number; // inclusive inst-id range between head label and back jump
+  bodyTo: number;
 };
 
 export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_ORDER): string {
@@ -167,7 +189,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
   }
 
   /** Make a constant operand, or null if the value has no plain IC10 literal. */
-  function constOp(value: number): Operand | null {
+  function constOp(value: number): ConstOperand | null {
     if (!Number.isFinite(value)) return null;
     const text = String(value);
     if (text.includes("e") || text.includes("E")) return null;
@@ -187,29 +209,35 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
   // ---------------------------------------------------------------------
 
   const instructions: Inst[] = [];
-  const regions: Region[] = [];
+  const ifRegions: IfRegion[] = [];
+  const loopRegions: LoopRegion[] = [];
   let nextInstId = 0;
   let nextVreg = 0;
   let ifCounter = 0;
+  let loopCounter = 0;
+  let whileCounter = 0;
+  let repeatCounter = 0;
   let shortCircuitCounter = 0;
   const scratch = new Set<number>();   // vregs created by spilling; never re-spilled
   const boolVregs = new Set<number>(); // vregs known to hold 0/1
 
   // Innermost scope last; declarations die when their scope is popped
   const scopes: Map<string, VarState>[] = [new Map()];
+  // Targets for break/continue of the innermost enclosing loop
+  const loopStack: { breakLabel: string; continueLabel: string }[] = [];
   // Placeholder name -> vreg already holding it in the current statement,
   // so `a * a` loads `a` once. Not shared across statements: a placeholder
   // may be written in between, and device reads should stay explicit.
   let statementLoads = new Map<string, number>();
   // vregs created after this point belong to the current statement and are
-  // safe to retarget into a home register (see writeThrough)
+  // safe to retarget into a home register (see assignVariable)
   let statementVregBase = 0;
 
   function vreg(): number {
     return nextVreg++;
   }
 
-  function emit(inst: Omit<Inst, "id">): Inst {
+  function emit(inst: DistributiveOmit<Inst, "id">): Inst {
     const complete = { ...inst, id: nextInstId++ } as Inst;
     instructions.push(complete);
     return complete;
@@ -234,11 +262,17 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     return count;
   }
 
+  function foldTruthy(operand: ConstOperand | null): boolean | null {
+    if (!operand) return null;
+    return parseFloat(operand.text) !== 0;
+  }
+
   /**
    * Try to evaluate an expression to a compile-time constant without
-   * emitting any code. Returns the folded operand or null.
+   * emitting any code. && and || fold when one side settles the outcome
+   * (the other side is pure, so skipping it is safe).
    */
-  function foldExpression(node: SyntaxNode): Operand | null {
+  function foldExpression(node: SyntaxNode): ConstOperand | null {
     switch (node.type) {
       case "Number":
         return constOp(parseFloat(node.text));
@@ -261,19 +295,31 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       }
       case "BinaryOp": {
         const [left, opNode, right] = kids(node);
+        const op = opNode.text;
         const a = foldExpression(left);
         const b = foldExpression(right);
+        if (op === "&&") {
+          const ta = foldTruthy(a);
+          const tb = foldTruthy(b);
+          if (ta === false || tb === false) return { kind: "const", text: "0" };
+          if (ta === true && tb === true) return { kind: "const", text: "1" };
+          return null;
+        }
+        if (op === "||") {
+          const ta = foldTruthy(a);
+          const tb = foldTruthy(b);
+          if (ta === true || tb === true) return { kind: "const", text: "1" };
+          if (ta === false && tb === false) return { kind: "const", text: "0" };
+          return null;
+        }
         if (!a || !b) return null;
         const x = parseFloat(a.text);
         const y = parseFloat(b.text);
-        const op = opNode.text;
         if (op in ALU_OPCODES) {
           const value = op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y;
           return constOp(value);
         }
         if (op in COMPARE_JS) return { kind: "const", text: COMPARE_JS[op](x, y) ? "1" : "0" };
-        if (op === "&&") return { kind: "const", text: x !== 0 && y !== 0 ? "1" : "0" };
-        if (op === "||") return { kind: "const", text: x !== 0 || y !== 0 ? "1" : "0" };
         return null;
       }
       default:
@@ -287,9 +333,6 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
    * allocation happens later over the whole program.
    */
   function pressure(node: SyntaxNode): number {
-    // Anything that folds to a constant costs zero registers, regardless of
-    // how deeply nested (e.g. -5, 2 + 3, or a variable known to hold 5).
-    if (foldExpression(node)) return 0;
     switch (node.type) {
       case "Number":
       case "Bool":
@@ -456,7 +499,8 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
    * Compile a condition as control flow: branch to `target` when the
    * condition's truth equals `jumpWhen`, fall through otherwise.
    * Comparisons fuse into a single branch instruction; && and ||
-   * short-circuit. Returns nothing — code is emitted directly.
+   * short-circuit (so a placeholder load on the right is skipped when the
+   * left side already decided).
    */
   function compileCondition(node: SyntaxNode, target: string, jumpWhen: boolean) {
     switch (node.type) {
@@ -518,10 +562,16 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     emit({ op: "branch", opcode: jumpWhen ? "bnez" : "beqz", args: [value], target, node });
   }
 
+  function setDest(inst: Inst, dest: number) {
+    if (inst.op === "alu" || inst.op === "movev" || inst.op === "loadname" || inst.op === "get") {
+      inst.dest = dest;
+    }
+  }
+
   /**
-   * Record an assignment's value. For demoted variables (inside an if that
-   * assigns them) the value is also written to the home vreg, retargeting
-   * the instruction that just produced it when possible.
+   * Record an assignment's value. For demoted variables (inside an if/loop
+   * that assigns them) the value is also written to the home vreg,
+   * retargeting the instruction that just produced it when possible.
    */
   function assignVariable(state: VarState, value: Operand, node: SyntaxNode) {
     if (state.home !== null) {
@@ -534,7 +584,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       ) {
         // The value was just computed by this statement; write it straight
         // into the home register instead of adding a move.
-        (last as { dest: number }).dest = state.home;
+        setDest(last, state.home);
         state.value = { kind: "vreg", id: state.home };
       } else {
         emit({ op: "movev", dest: state.home, src: value, node });
@@ -546,7 +596,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     state.maybe = false;
   }
 
-  /** Collect assignment target names inside a block (including nested ifs). */
+  /** Collect assignment target names inside a block (including nested constructs). */
   function collectAssignedNames(block: SyntaxNode[], out: Set<string>) {
     for (const statement of block) {
       if (statement.type === "Assignment") {
@@ -555,26 +605,23 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       } else if (statement.type === "IfExpr") {
         for (const part of kids(statement)) {
           if (part.type === "If" || part.type === "ElseIf" || part.type === "Else") {
-            collectAssignedNames(armBlock(part), out);
+            collectAssignedNames(blockOf(part), out);
           }
         }
+      } else if (statement.type === "LoopExpr" || statement.type === "WhileExpr" || statement.type === "RepeatUntilExpr") {
+        collectAssignedNames(blockOf(statement), out);
       }
     }
   }
 
-  /** The statements of an If/ElseIf/Else arm (keyword and condition nodes filtered out). */
-  function armBlock(arm: SyntaxNode): SyntaxNode[] {
-    return kids(arm).filter(c => STATEMENT_TYPES.has(c.type));
+  /** The statement children of a construct (keywords and conditions filtered out). */
+  function blockOf(node: SyntaxNode): SyntaxNode[] {
+    return kids(node).filter(c => STATEMENT_TYPES.has(c.type));
   }
 
-  function armCondition(arm: SyntaxNode): SyntaxNode | null {
-    if (arm.type === "Else") return null;
-    // The condition is the first expression child (before `then`)
-    for (const part of kids(arm)) {
-      if (part.type === "then") break;
-      if (EXPRESSION_TYPES.has(part.type)) return part;
-    }
-    return null;
+  /** The single expression child of a construct (while/until condition). */
+  function conditionOf(node: SyntaxNode): SyntaxNode | null {
+    return kids(node).find(c => EXPRESSION_TYPES.has(c.type)) ?? null;
   }
 
   function processBlockScoped(statements: SyntaxNode[]) {
@@ -583,13 +630,66 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     scopes.pop();
   }
 
+  // -------------------- variable demotion at merges ----------------------
+
+  type Demoted = {
+    state: VarState;
+    savedHome: number | null;
+    entryValue: Operand | null;
+    entryMaybe: boolean;
+  };
+
+  /**
+   * Demote every visible variable in `names` to a home vreg: reuse the
+   * variable's own vreg when it owns one outright, otherwise materialize
+   * the current value into a fresh register before the control flow forks.
+   */
+  function demoteVariables(names: Set<string>, node: SyntaxNode): Demoted[] {
+    const demoted: Demoted[] = [];
+    for (const name of names) {
+      const state = lookup(name);
+      if (!state) continue; // placeholder writes need no merge handling
+      const record: Demoted = {
+        state,
+        savedHome: state.home,
+        entryValue: state.value,
+        entryMaybe: state.maybe,
+      };
+      if (state.home === null) {
+        if (state.value?.kind === "vreg" && valueRefCount(state.value.id) === 1 && !scratch.has(state.value.id)) {
+          // The variable owns this vreg outright: adopt it as the home
+          state.home = state.value.id;
+        } else {
+          state.home = vreg();
+          if (state.value) {
+            emit({ op: "movev", dest: state.home, src: state.value, node });
+            state.value = { kind: "vreg", id: state.home };
+          }
+        }
+      }
+      demoted.push(record);
+    }
+    return demoted;
+  }
+
+  /** After the construct: the variable lives in its home register. */
+  function finalizeDemoted(demoted: Demoted[], definitelyAssigned: (d: Demoted) => boolean) {
+    for (const d of demoted) {
+      d.state.value = { kind: "vreg", id: d.state.home! };
+      d.state.maybe = !definitelyAssigned(d);
+      d.state.home = d.savedHome;
+    }
+  }
+
+  // ------------------------------ if ------------------------------------
+
   function processIf(node: SyntaxNode) {
-    // Gather the arms: If, ElseIf*, Else?
-    type Arm = { cond: SyntaxNode | null; block: SyntaxNode[]; node: SyntaxNode };
+    type Arm = { cond: SyntaxNode | null; block: SyntaxNode[]; node: SyntaxNode; assigned: boolean };
     let arms: Arm[] = [];
     for (const part of kids(node)) {
       if (part.type === "If" || part.type === "ElseIf" || part.type === "Else") {
-        arms.push({ cond: armCondition(part), block: armBlock(part), node: part });
+        const cond = part.type === "Else" ? null : conditionOf(part);
+        arms.push({ cond, block: blockOf(part), node: part, assigned: false });
       }
     }
 
@@ -607,7 +707,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
         continue;
       }
       if (parseFloat(folded.text) !== 0) {
-        resolved.push({ cond: null, block: arm.block, node: arm.node });
+        resolved.push({ ...arm, cond: null });
         break;
       }
       // Constant false: drop the arm entirely
@@ -621,45 +721,12 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       return;
     }
 
-    // Demote every outer variable assigned in any arm to a home vreg, so all
-    // paths agree on where the variable lives at the merge point.
+    // Demote every outer variable assigned in any arm, so all paths agree
+    // on where the variable lives at the merge point.
     const assignedNames = new Set<string>();
     for (const arm of arms) collectAssignedNames(arm.block, assignedNames);
+    const demoted = demoteVariables(assignedNames, node);
 
-    type Demoted = {
-      state: VarState;
-      savedHome: number | null;
-      savedValue: Operand | null;
-      savedMaybe: boolean;
-      assignedEverywhere: boolean;
-    };
-    const demoted: Demoted[] = [];
-    for (const name of assignedNames) {
-      const state = lookup(name);
-      if (!state) continue; // placeholder writes need no merge handling
-      const saved: Demoted = {
-        state,
-        savedHome: state.home,
-        savedValue: state.value,
-        savedMaybe: state.maybe,
-        assignedEverywhere: true,
-      };
-      if (state.home === null) {
-        if (state.value?.kind === "vreg" && valueRefCount(state.value.id) === 1 && !boolVregs.has(state.value.id)) {
-          // The variable owns this vreg outright: adopt it as the home
-          state.home = state.value.id;
-        } else {
-          state.home = vreg();
-          if (state.value) {
-            emit({ op: "movev", dest: state.home, src: state.value, node });
-            state.value = { kind: "vreg", id: state.home };
-          }
-        }
-      }
-      demoted.push(saved);
-    }
-
-    // Emit the skeleton
     const k = ifCounter++;
     const endLabel = `endif${k}`;
     let elifIndex = 0;
@@ -668,16 +735,16 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       return arm.cond ? `if${k}elif${elifIndex++}` : `else${k}`;
     });
 
-    const region: Region = { arms: [], endLabelName: endLabel, endLabelId: -1 };
-    const entryValues = demoted.map(d => ({ value: d.state.value, maybe: d.state.maybe }));
+    const region: IfRegion = { arms: [], endLabelName: endLabel, endLabelId: -1 };
+    let assignedInAllArms = true;
 
     for (let i = 0; i < arms.length; i++) {
       const arm = arms[i];
       // Each arm starts from the pre-if variable state
-      demoted.forEach((d, j) => {
-        d.state.value = entryValues[j].value;
-        d.state.maybe = entryValues[j].maybe;
-      });
+      for (const d of demoted) {
+        d.state.value = d.entryValue;
+        d.state.maybe = d.entryMaybe;
+      }
 
       const condFrom = nextInstId;
       if (arm.cond) {
@@ -694,22 +761,13 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       processBlockScoped(arm.block);
       const bodyTo = nextInstId - 1;
 
-      // Track which demoted variables this arm assigned
-      demoted.forEach((d, j) => {
-        const assigned = d.state.value !== entryValues[j].value || (!d.state.maybe && entryValues[j].maybe);
-        const assignedHere = !d.state.maybe && d.state.value !== null &&
-          (d.state.value !== entryValues[j].value || entryValues[j].value !== null);
-        // A variable is definitely assigned after the if only if every arm
-        // assigns it or it was already assigned before the if.
-        if (!(assignedHere || (entryValues[j].value !== null && !entryValues[j].maybe))) {
-          d.assignedEverywhere = false;
-        }
-        void assigned;
-      });
+      // Did this arm leave every demoted variable definitely assigned?
+      for (const d of demoted) {
+        if (d.state.maybe || d.state.value === null) assignedInAllArms = false;
+      }
 
-      let jumpId: number | null = null;
       if (i < arms.length - 1) {
-        jumpId = emit({ op: "jump", target: endLabel, node: arm.node }).id;
+        const jumpId = emit({ op: "jump", target: endLabel, node: arm.node }).id;
         const labelName = armLabels[i + 1]!;
         const labelId = emit({ op: "label", name: labelName, node: arm.node }).id;
         region.arms.push({ condIds, branchIds, bodyFrom, bodyTo, jumpId, labelName, labelId });
@@ -718,30 +776,141 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       }
     }
 
-    // A chain without an else has an implicit empty arm: variables are only
-    // definitely assigned if they were before the if.
+    // A chain without an else has an implicit empty arm
     const hasElse = arms[arms.length - 1].cond === null;
 
     region.endLabelId = emit({ op: "label", name: endLabel, node }).id;
-    regions.push(region);
+    ifRegions.push(region);
 
-    // Merge: the variable now lives in its home register
-    demoted.forEach((d, j) => {
-      const wasAssigned = entryValues[j].value !== null && !entryValues[j].maybe;
-      const definite = wasAssigned || (hasElse && d.assignedEverywhere);
+    finalizeDemoted(demoted, d =>
+      (d.entryValue !== null && !d.entryMaybe) || (hasElse && assignedInAllArms));
+  }
+
+  // ----------------------------- loops -----------------------------------
+
+  /** Shared lowering for all loop kinds once labels and demotion are set up. */
+  function lowerLoopBody(
+    body: SyntaxNode[],
+    demoted: Demoted[],
+    headLabel: string,
+    breakLabel: string,
+    continueLabel: string,
+    node: SyntaxNode,
+  ) {
+    // Inside the body, a demoted variable's value may come from a previous
+    // iteration: forget constants, and treat unassigned entries as maybes.
+    for (const d of demoted) {
       d.state.value = { kind: "vreg", id: d.state.home! };
-      d.state.maybe = !definite;
-      d.state.home = d.savedHome;
-      void d.savedValue;
-      void d.savedMaybe;
-    });
+      d.state.maybe = d.entryMaybe || d.entryValue === null;
+    }
+    const headLabelId = emit({ op: "label", name: headLabel, node }).id;
+    loopStack.push({ breakLabel, continueLabel });
+    const bodyFrom = nextInstId;
+    processBlockScoped(body);
+    const bodyTo = nextInstId - 1;
+    loopStack.pop();
+    return { headLabelId, bodyFrom, bodyTo };
   }
 
-  function idRange(from: number, to: number): number[] {
-    const ids: number[] = [];
-    for (let i = from; i < to; i++) ids.push(i);
-    return ids;
+  function processLoop(node: SyntaxNode) {
+    const body = blockOf(node);
+    const assigned = new Set<string>();
+    collectAssignedNames(body, assigned);
+    const demoted = demoteVariables(assigned, node);
+
+    const k = loopCounter++;
+    const head = `loop${k}`;
+    const end = `endloop${k}`;
+    const { headLabelId, bodyFrom, bodyTo } = lowerLoopBody(body, demoted, head, end, head, node);
+    const backJumpId = emit({ op: "jump", target: head, node }).id;
+    emit({ op: "label", name: end, node });
+    loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+
+    // `loop` only exits through break: whether a variable was assigned by
+    // the time of the break is path-dependent, so stay conservative.
+    finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
   }
+
+  function processWhile(node: SyntaxNode) {
+    const cond = conditionOf(node);
+    if (!cond) throw error("Malformed while loop", node);
+
+    const folded = foldExpression(cond);
+    if (folded && parseFloat(folded.text) === 0) return; // never runs
+
+    const body = blockOf(node);
+    const assigned = new Set<string>();
+    collectAssignedNames(body, assigned);
+    const demoted = demoteVariables(assigned, node);
+
+    const k = whileCounter++;
+    const head = `while${k}`;
+    const end = `endwhile${k}`;
+
+    for (const d of demoted) {
+      d.state.value = { kind: "vreg", id: d.state.home! };
+      d.state.maybe = d.entryMaybe || d.entryValue === null;
+    }
+    const headLabelId = emit({ op: "label", name: head, node }).id;
+    if (!folded) {
+      compileCondition(cond, end, false);
+      statementLoads = new Map();
+    }
+    loopStack.push({ breakLabel: end, continueLabel: head });
+    const bodyFrom = nextInstId;
+    processBlockScoped(body);
+    const bodyTo = nextInstId - 1;
+    loopStack.pop();
+    const backJumpId = emit({ op: "jump", target: head, node }).id;
+    emit({ op: "label", name: end, node });
+    loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+
+    // The body may run zero times
+    finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
+  }
+
+  function processRepeat(node: SyntaxNode) {
+    const cond = conditionOf(node);
+    if (!cond) throw error("Malformed repeat loop", node);
+
+    const body = blockOf(node);
+    const assigned = new Set<string>();
+    collectAssignedNames(body, assigned);
+    const demoted = demoteVariables(assigned, node);
+
+    const k = repeatCounter++;
+    const head = `repeat${k}`;
+    const untilLabel = `until${k}`;
+    const end = `endrepeat${k}`;
+
+    const { headLabelId, bodyFrom } = lowerLoopBody(body, demoted, head, end, untilLabel, node);
+    emit({ op: "label", name: untilLabel, node });
+    // Loop back while the until-condition is FALSE
+    const folded = foldExpression(cond);
+    const condFrom = nextInstId;
+    if (folded) {
+      // Constant condition: always-false loops forever, always-true falls out
+      if (parseFloat(folded.text) === 0) emit({ op: "jump", target: head, node });
+    } else {
+      compileCondition(cond, head, false);
+    }
+    statementLoads = new Map();
+    const bodyTo = nextInstId - 1;
+    // The back jump may not exist (constant-true condition); use the last
+    // emitted branch/jump if there is one.
+    const last = instructions[instructions.length - 1];
+    const backJumpId = last && last.id >= condFrom ? last.id : -1;
+    emit({ op: "label", name: end, node });
+    if (backJumpId >= 0) {
+      loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+    }
+
+    // The body always runs at least once
+    finalizeDemoted(demoted, d =>
+      (d.entryValue !== null && !d.entryMaybe) || (!d.state.maybe && d.state.value !== null));
+  }
+
+  // --------------------------- statements --------------------------------
 
   function processStatement(statement: SyntaxNode) {
     const parts = kids(statement);
@@ -776,6 +945,39 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
       case "IfExpr":
         processIf(statement);
         break;
+      case "LoopExpr":
+        processLoop(statement);
+        break;
+      case "WhileExpr":
+        processWhile(statement);
+        break;
+      case "RepeatUntilExpr":
+        processRepeat(statement);
+        break;
+      case "break": {
+        const loop = loopStack[loopStack.length - 1];
+        if (!loop) throw error("break outside of a loop", statement);
+        emit({ op: "jump", target: loop.breakLabel, node: statement });
+        break;
+      }
+      case "continue": {
+        const loop = loopStack[loopStack.length - 1];
+        if (!loop) throw error("continue outside of a loop", statement);
+        emit({ op: "jump", target: loop.continueLabel, node: statement });
+        break;
+      }
+      case "Instruction": {
+        // yield, or sleep with one operand
+        const expression = parts.find(c => EXPRESSION_TYPES.has(c.type));
+        if (statement.text.startsWith("sleep")) {
+          if (!expression) throw error("sleep needs a duration", statement);
+          const value = compileExpression(expression);
+          emit({ op: "raw", opcode: "sleep", args: [value], node: statement });
+        } else {
+          emit({ op: "raw", opcode: "yield", args: [], node: statement });
+        }
+        break;
+      }
       case "Comment":
         break;
       default:
@@ -783,6 +985,12 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     }
     statementLoads = new Map();
     statementVregBase = nextVreg;
+  }
+
+  function idRange(from: number, to: number): number[] {
+    const ids: number[] = [];
+    for (let i = from; i < to; i++) ids.push(i);
+    return ids;
   }
 
   // ---------------------------------------------------------------------
@@ -805,6 +1013,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     switch (inst.op) {
       case "alu":
       case "branch":
+      case "raw":
         return inst.args;
       case "movev":
       case "storename":
@@ -817,28 +1026,76 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
 
   function usesOf(inst: Inst): number[] {
     return operandsOf(inst)
-      .filter(o => o.kind === "vreg")
-      .map(o => (o as { kind: "vreg"; id: number }).id);
+      .filter((o): o is VRegOperand => o.kind === "vreg")
+      .map(o => o.id);
+  }
+
+  function hasSideEffect(inst: Inst): boolean {
+    return inst.op === "storename" || inst.op === "poke" || inst.op === "raw";
+  }
+
+  function setsEqual(a: Set<number>, b: Set<number>): boolean {
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
   }
 
   // ---------------------------------------------------------------------
-  // 2. Dead code elimination + branch simplification, to a fixed point
+  // 2. Dead code elimination + control-flow cleanup, to a fixed point
   // ---------------------------------------------------------------------
 
   /**
-   * Backward liveness over the linear IR. All branches are forward, so a
-   * single backward pass is exact: every label's live set is known before
-   * any branch to it is reached.
+   * Converge the live set at every label. Loops branch backwards, so a
+   * single pass is not enough: iterate until label live-sets stabilize.
+   * Definitions that are dead (and side-effect free) contribute no uses.
    */
-  function eliminateDeadCode(program: Inst[]): Inst[] {
+  function convergeLiveness(program: Inst[]): Map<string, Set<number>> {
     const liveAtLabel = new Map<string, Set<number>>();
+    for (let pass = 0; pass < program.length + 2; pass++) {
+      let changed = false;
+      let live = new Set<number>();
+      for (let i = program.length - 1; i >= 0; i--) {
+        const inst = program[i];
+        switch (inst.op) {
+          case "label": {
+            const previous = liveAtLabel.get(inst.name);
+            if (!previous || !setsEqual(previous, live)) {
+              liveAtLabel.set(inst.name, new Set(live));
+              changed = true;
+            }
+            break;
+          }
+          case "jump":
+            live = new Set(liveAtLabel.get(inst.target) ?? []);
+            break;
+          case "branch": {
+            for (const v of liveAtLabel.get(inst.target) ?? []) live.add(v);
+            for (const used of usesOf(inst)) live.add(used);
+            break;
+          }
+          default: {
+            const dest = destOf(inst);
+            if (!hasSideEffect(inst) && dest !== null && !live.has(dest)) break; // dead
+            if (dest !== null) live.delete(dest);
+            for (const used of usesOf(inst)) live.add(used);
+          }
+        }
+      }
+      if (!changed) break;
+    }
+    return liveAtLabel;
+  }
+
+  /** Keep only instructions that contribute to a side effect. */
+  function eliminateDeadCode(program: Inst[]): Inst[] {
+    const liveAtLabel = convergeLiveness(program);
     let live = new Set<number>();
     const kept: Inst[] = [];
     for (let i = program.length - 1; i >= 0; i--) {
       const inst = program[i];
       switch (inst.op) {
         case "label":
-          liveAtLabel.set(inst.name, new Set(live));
+          live = new Set(liveAtLabel.get(inst.name) ?? []);
           kept.push(inst);
           continue;
         case "jump":
@@ -846,16 +1103,14 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
           kept.push(inst);
           continue;
         case "branch": {
-          const atTarget = liveAtLabel.get(inst.target);
-          if (atTarget) for (const v of atTarget) live.add(v);
+          for (const v of liveAtLabel.get(inst.target) ?? []) live.add(v);
           for (const used of usesOf(inst)) live.add(used);
           kept.push(inst);
           continue;
         }
       }
-      const sideEffect = inst.op === "storename" || inst.op === "poke";
       const dest = destOf(inst);
-      if (!sideEffect && (dest === null || !live.has(dest))) continue;
+      if (!hasSideEffect(inst) && (dest === null || !live.has(dest))) continue;
       if (dest !== null) live.delete(dest);
       for (const used of usesOf(inst)) live.add(used);
       kept.push(inst);
@@ -864,8 +1119,11 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
   }
 
   /**
-   * Simplify if-regions whose arms became empty: remove the whole skeleton
-   * when nothing is left, or invert the branch over an empty then/else arm.
+   * Simplify if-regions whose arms changed shape after DCE:
+   *  - all arms empty: delete the whole skeleton
+   *  - then-arm is exactly one jump (break/continue): fuse it into the branch
+   *  - empty then over a non-empty else: invert the branch
+   *  - empty else: branch straight to the end label
    * Returns null if nothing changed.
    */
   function simplifyBranches(program: Inst[]): Inst[] | null {
@@ -874,25 +1132,27 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     const remove = new Set<number>();
     let changed = false;
 
-    function armHasContent(arm: Region["arms"][number]): boolean {
-      for (const inst of program) {
-        if (inst.id < arm.bodyFrom || inst.id > arm.bodyTo || remove.has(inst.id)) continue;
-        if (inst.op !== "label") return true;
-      }
-      return false;
+    function armContents(arm: IfRegion["arms"][number]): Inst[] {
+      return program.filter(inst =>
+        inst.id >= arm.bodyFrom && inst.id <= arm.bodyTo &&
+        !remove.has(inst.id) && inst.op !== "label");
     }
 
-    // Regions were recorded innermost-first, so inner ifs collapse before
-    // their parents are examined.
-    for (const region of regions) {
+    // Regions were recorded innermost-first, so inner constructs collapse
+    // before their parents are examined.
+    for (const region of ifRegions) {
       const alive = region.arms.some(arm =>
         arm.condIds.some(id => present.has(id) && !remove.has(id)) ||
         arm.branchIds.some(id => present.has(id) && !remove.has(id)));
       if (!alive) continue;
 
-      const contents = region.arms.map(armHasContent);
+      // A region that already fused or inverted its branch keeps its
+      // meaning inside the branch instruction: never touch it again.
+      if (region.simplified) continue;
 
-      if (contents.every(c => !c)) {
+      const contents = region.arms.map(armContents);
+
+      if (contents.every(c => c.length === 0)) {
         // Nothing in any arm: delete the entire skeleton; the condition's
         // loads die in the next liveness pass.
         for (const arm of region.arms) {
@@ -905,11 +1165,29 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
         continue;
       }
 
+      // A lone then-arm that is exactly `break`/`continue`: jump there
+      // directly when the condition holds.
+      if (region.arms.length === 1 && region.arms[0].branchIds.length === 1) {
+        const thenArm = region.arms[0];
+        const only = contents[0];
+        if (only.length === 1 && only[0].op === "jump") {
+          const branch = present.get(thenArm.branchIds[0]);
+          if (branch && branch.op === "branch" && INVERT_BRANCH[branch.opcode]) {
+            branch.opcode = INVERT_BRANCH[branch.opcode];
+            branch.target = only[0].target;
+            remove.add(only[0].id);
+            region.simplified = true;
+            changed = true;
+            continue;
+          }
+        }
+      }
+
       // A simple if/else: the then-arm's record carries the `else` label
       // that separates the two arms.
-      if (region.arms.length === 2 && region.arms[0].labelName?.startsWith("else") && !region.simplified) {
+      if (region.arms.length === 2 && region.arms[0].labelName?.startsWith("else")) {
         const thenArm = region.arms[0];
-        if (!contents[0] && contents[1] && thenArm.branchIds.length === 1) {
+        if (contents[0].length === 0 && contents[1].length > 0 && thenArm.branchIds.length === 1) {
           // Empty then: invert the single branch to jump over the else arm
           const branch = present.get(thenArm.branchIds[0]);
           if (branch && branch.op === "branch" && INVERT_BRANCH[branch.opcode]) {
@@ -922,7 +1200,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
             continue;
           }
         }
-        if (contents[0] && !contents[1]) {
+        if (contents[0].length > 0 && contents[1].length === 0) {
           // Empty else: fall straight through to the end label
           for (const id of thenArm.branchIds) {
             const branch = present.get(id);
@@ -930,8 +1208,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
               branch.target = region.endLabelName;
             }
           }
-          const jump = thenArm.jumpId !== null ? present.get(thenArm.jumpId) : undefined;
-          if (jump) remove.add(jump.id);
+          if (thenArm.jumpId !== null) remove.add(thenArm.jumpId);
           if (thenArm.labelId !== null) remove.add(thenArm.labelId);
           region.simplified = true;
           changed = true;
@@ -944,49 +1221,175 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     return program.filter(inst => !remove.has(inst.id));
   }
 
+  /** Loops whose bodies emptied out are spin cycles with no effects: prune. */
+  function pruneEmptyLoops(program: Inst[]): Inst[] | null {
+    const present = new Map<number, Inst>();
+    for (const inst of program) present.set(inst.id, inst);
+    const remove = new Set<number>();
+
+    for (const region of loopRegions) {
+      if (!present.has(region.backJumpId)) continue;
+      const content = program.some(inst =>
+        inst.id >= region.bodyFrom && inst.id <= region.bodyTo && inst.op !== "label");
+      if (!content) remove.add(region.backJumpId);
+    }
+
+    if (remove.size === 0) return null;
+    return program.filter(inst => !remove.has(inst.id));
+  }
+
+  /** Instructions after an unconditional jump are unreachable until a label. */
+  function removeUnreachable(program: Inst[]): Inst[] | null {
+    const kept: Inst[] = [];
+    let reachable = true;
+    let changed = false;
+    for (const inst of program) {
+      if (inst.op === "label") reachable = true;
+      if (!reachable) {
+        changed = true;
+        continue;
+      }
+      kept.push(inst);
+      if (inst.op === "jump") reachable = false;
+    }
+    return changed ? kept : null;
+  }
+
+  /** A jump whose target label follows immediately (labels between) is a no-op. */
+  function removeJumpsToNext(program: Inst[]): Inst[] | null {
+    const remove = new Set<number>();
+    for (let i = 0; i < program.length; i++) {
+      const inst = program[i];
+      if (inst.op !== "jump") continue;
+      for (let j = i + 1; j < program.length; j++) {
+        const next = program[j];
+        if (next.op !== "label") break;
+        if (next.name === inst.target) {
+          remove.add(inst.id);
+          break;
+        }
+      }
+    }
+    if (remove.size === 0) return null;
+    return program.filter(inst => !remove.has(inst.id));
+  }
+
   /** Drop labels that nothing jumps to anymore. */
-  function collectGarbageLabels(program: Inst[]): Inst[] {
+  function collectGarbageLabels(program: Inst[]): Inst[] | null {
     const targets = new Set<string>();
     for (const inst of program) {
       if (inst.op === "jump" || inst.op === "branch") targets.add(inst.target);
     }
-    return program.filter(inst => inst.op !== "label" || targets.has(inst.name));
+    const kept = program.filter(inst => inst.op !== "label" || targets.has(inst.name));
+    return kept.length === program.length ? null : kept;
   }
 
   // ---------------------------------------------------------------------
-  // 3. Linear-scan register allocation with spilling
+  // 3. Linear-scan register allocation with store sinking and spilling
   // ---------------------------------------------------------------------
+
+  /**
+   * Live ranges from converged dataflow: a value's range ends at the last
+   * position where it is still live-in, which extends across loop back
+   * edges (a value used early in a loop body is busy until the back jump).
+   */
+  function computeRanges(program: Inst[]) {
+    const liveAtLabel = convergeLiveness(program);
+    const end = new Map<number, number>();
+    const useCount = new Map<number, number>();
+    let live = new Set<number>();
+    for (let i = program.length - 1; i >= 0; i--) {
+      const inst = program[i];
+      switch (inst.op) {
+        case "label":
+          live = new Set(liveAtLabel.get(inst.name) ?? []);
+          break;
+        case "jump":
+          live = new Set(liveAtLabel.get(inst.target) ?? []);
+          break;
+        case "branch":
+          for (const v of liveAtLabel.get(inst.target) ?? []) live.add(v);
+          for (const used of usesOf(inst)) live.add(used);
+          break;
+        default: {
+          const dest = destOf(inst);
+          if (dest !== null) live.delete(dest);
+          for (const used of usesOf(inst)) live.add(used);
+        }
+      }
+      for (const used of usesOf(inst)) {
+        useCount.set(used, (useCount.get(used) ?? 0) + 1);
+      }
+      // `live` is now the live-in set of instruction i
+      for (const v of live) {
+        if (!end.has(v)) end.set(v, i);
+      }
+    }
+    return { end, useCount };
+  }
+
+  /**
+   * Move placeholder stores earlier — right after the value they store is
+   * computed — to shorten live ranges under register pressure. A store may
+   * not cross another placeholder access, a yield/sleep, control flow, or
+   * its own value's definition, so the observable order is unchanged.
+   */
+  function sinkStores(program: Inst[]): Inst[] {
+    const defCount = new Map<number, number>();
+    for (const inst of program) {
+      const dest = destOf(inst);
+      if (dest !== null) defCount.set(dest, (defCount.get(dest) ?? 0) + 1);
+    }
+
+    const result = [...program];
+    for (let i = 0; i < result.length; i++) {
+      const inst = result[i];
+      if (inst.op !== "storename" || inst.src.kind !== "vreg") continue;
+      if (defCount.get(inst.src.id) !== 1) continue;
+      const value = inst.src.id;
+
+      let target = i;
+      for (let j = i - 1; j >= 0; j--) {
+        const other = result[j];
+        const barrier =
+          other.op === "storename" || other.op === "loadname" || other.op === "raw" ||
+          other.op === "poke" || other.op === "get" ||
+          other.op === "label" || other.op === "jump" || other.op === "branch" ||
+          destOf(other) === value;
+        if (barrier) break;
+        target = j;
+      }
+      if (target < i) {
+        result.splice(i, 1);
+        result.splice(target, 0, inst);
+      }
+    }
+    return result;
+  }
 
   function allocateAndEmit(program: Inst[]): string {
     let nextSpillAddr = STACK_TOP;
+    let storesSunk = false;
 
     for (;;) {
-      // Liveness by position: all branches are forward, so [first def,
-      // last use] is a sound interval even across arms.
-      const lastUse = new Map<number, number>();
-      const useCount = new Map<number, number>();
-      program.forEach((inst, i) => {
-        for (const used of usesOf(inst)) {
-          lastUse.set(used, i);
-          useCount.set(used, (useCount.get(used) ?? 0) + 1);
-        }
-      });
+      const { end, useCount } = computeRanges(program);
 
       const regOf = new Map<number, number>();
       const active: number[] = [];
       const free = [...registerOrder];
       let victim: number | null = null;
+      let victimNode: SyntaxNode = ast;
 
       for (let i = 0; i < program.length && victim === null; i++) {
         const dest = destOf(program[i]);
         if (dest === null) continue;
         if (regOf.has(dest)) continue; // later write to a home vreg
 
-        // Values whose last use is behind us (or in this very instruction)
-        // release their register: IC10 reads operands before writing.
+        // Values not live past this point release their register:
+        // IC10 reads operands before writing the destination.
         for (let k = active.length - 1; k >= 0; k--) {
           const v = active[k];
-          if ((lastUse.get(v) ?? i) <= i) {
+          if ((end.get(v) ?? i) <= i) {
             active.splice(k, 1);
             free.push(regOf.get(v)!);
           }
@@ -1001,9 +1404,10 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
           }
           candidates.sort((x, y) =>
             (useCount.get(x) ?? 0) - (useCount.get(y) ?? 0) ||
-            (lastUse.get(y) ?? 0) - (lastUse.get(x) ?? 0) ||
+            (end.get(y) ?? 0) - (end.get(x) ?? 0) ||
             y - x);
           victim = candidates[0];
+          victimNode = program[i].node;
           break;
         }
 
@@ -1025,6 +1429,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
               case "storename": return `move ${inst.name} ${fmt(inst.src)}`;
               case "get": return `get r${regOf.get(inst.dest)} db ${inst.addr}`;
               case "poke": return `poke ${inst.addr} ${fmt(inst.src)}`;
+              case "raw": return [inst.opcode, ...inst.args.map(fmt)].join(" ");
               case "label": return `${inst.name}:`;
               case "jump": return `j ${inst.target}`;
               case "branch": return `${inst.opcode} ${inst.args.map(fmt).join(" ")} ${inst.target}`;
@@ -1033,9 +1438,17 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
           .join("\n");
       }
 
+      // First response to pressure: shorten live ranges by storing
+      // placeholder results as soon as they are ready.
+      if (!storesSunk) {
+        storesSunk = true;
+        program = sinkStores(program);
+        continue;
+      }
+
       // Rewrite the program with the victim living on the stack
       const addr = nextSpillAddr--;
-      if (addr < 0) throw error("Too many variables: out of stack memory", program[0].node);
+      if (addr < 0) throw error("Too many variables: out of stack memory", victimNode);
 
       const rewritten: Inst[] = [];
       for (const inst of program) {
@@ -1043,10 +1456,12 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
           // Define into a short-lived scratch register, then store
           const s = vreg();
           scratch.add(s);
-          rewritten.push({ ...inst, dest: s } as Inst);
+          const copy = { ...inst };
+          setDest(copy, s);
+          rewritten.push(copy);
           rewritten.push({ op: "poke", addr, src: { kind: "vreg", id: s }, node: inst.node, id: nextInstId++ });
         } else if (usesOf(inst).includes(victim)) {
-          // Reload before use; both operands of one instruction share it
+          // Reload before use; all operands of one instruction share it
           const s = vreg();
           scratch.add(s);
           rewritten.push({ op: "get", dest: s, addr, node: inst.node, id: nextInstId++ });
@@ -1055,6 +1470,7 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
           switch (inst.op) {
             case "alu":
             case "branch":
+            case "raw":
               rewritten.push({ ...inst, args: inst.args.map(replace) });
               break;
             case "movev":
@@ -1078,13 +1494,18 @@ export function compile(ast: SyntaxNode, registerOrder: number[] = VAR_REGISTER_
     processStatement(statement);
   }
 
-  let program = eliminateDeadCode(instructions);
+  let program: Inst[] = instructions;
   for (;;) {
-    const simplified = simplifyBranches(program);
-    if (!simplified) break;
-    program = eliminateDeadCode(simplified);
+    program = eliminateDeadCode(program);
+    const next =
+      simplifyBranches(program) ??
+      pruneEmptyLoops(program) ??
+      removeUnreachable(program) ??
+      removeJumpsToNext(program) ??
+      collectGarbageLabels(program);
+    if (!next) break;
+    program = next;
   }
-  program = collectGarbageLabels(program);
 
   return allocateAndEmit(program);
 }
