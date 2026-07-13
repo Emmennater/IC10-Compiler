@@ -42,6 +42,17 @@ function setCurrentScript(name) {
   refreshScriptList();
 }
 
+document.querySelector("#script-rename").addEventListener("click", () => {
+  if (!currentScript) return;
+  const name = window.prompt("Rename script to:") ?? "";
+  if (!name) return;
+  const scripts = readScripts();
+  scripts[name] = scripts[currentScript];
+  delete scripts[currentScript];
+  writeScripts(scripts);
+  setCurrentScript(name);
+});
+
 document.querySelector("#script-save").addEventListener("click", () => {
   const name = currentScript || (window.prompt("Save script as:") ?? "").trim();
   if (!name) return;

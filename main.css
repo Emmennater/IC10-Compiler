@@ -54,7 +54,7 @@ h1 {
   font-size: 16px;
   padding: 3px 8px;
   cursor: pointer;
-  max-width: 180px;
+  max-width: 30vw;
 }
 
 .script-controls select:hover,
