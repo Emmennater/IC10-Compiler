@@ -1,4 +1,5 @@
 .claude/
+dist/
 node_modules/
 package-lock.json
 ic10-docs.txt
