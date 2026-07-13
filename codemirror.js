@@ -119,8 +119,8 @@ const lang = LRLanguage.define({
   parser: parser.configure({
     props: [
       styleTags({
-        "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign UnaryOp \
-        UnaryAdd BracketLeft BracketRight Dot": t.operator,
+        "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
+        UnaryOp BracketLeft BracketRight Dot": t.operator,
         "let if then elif else end loop while do repeat until break continue define device \
         fn return At DirectiveName": t.keyword,
         "Instruction FunctionName": t.function(t.variableName),

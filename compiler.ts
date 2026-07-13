@@ -70,11 +70,21 @@ const ALU_OPCODES: Record<string, string> = {
   "-": "sub",
   "*": "mul",
   "/": "div",
+  "%": "mod",
 };
 
 // Comparison results as data (0/1 values)
 const SET_OPCODES: Record<string, string> = {
   "==": "seq", "!=": "sne", ">": "sgt", "<": "slt", ">=": "sge", "<=": "sle",
+};
+
+// Operator types
+const OP_TYPES: Record<string, string> = {
+  "+": "AddOp",
+  "-": "AddOp",
+  "*": "MulOp",
+  "/": "MulOp",
+  "%": "MulOp",
 };
 
 // Branch when the comparison is TRUE / FALSE
@@ -223,6 +233,10 @@ const DEFAULT_CONFIG: Config = {
   removeLabels: false,
   registerOrder: VAR_REGISTER_ORDER
 };
+
+function ic10_mod(n: number, m: number) {
+  return ((n % m) + m) % m;
+}
 
 export function compile(ast: SyntaxNode,
   config: Config = DEFAULT_CONFIG
@@ -787,7 +801,13 @@ export function compile(ast: SyntaxNode,
         if (a.kind === "const" && b.kind === "const") {
           const x = parseFloat(a.text);
           const y = parseFloat(b.text);
-          const value = op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y;
+          const value = (
+            op === "+" ? x + y :
+            op === "-" ? x - y :
+            op === "*" ? x * y :
+            op === "/" ? x / y :
+            ic10_mod(x, y)
+          );
           const folded = constOp(value);
           if (folded) return folded;
         }
@@ -1441,6 +1461,7 @@ export function compile(ast: SyntaxNode,
             case "-": return x - y;
             case "*": return x * y;
             case "/": return x / y;
+            case "%": return ic10_mod(x, y);
           }
           throw BAIL;
         }
@@ -1486,8 +1507,19 @@ export function compile(ast: SyntaxNode,
           if (target.type !== "VariableName") throw BAIL;
           const env = findEnv(envs, target.text);
           if (!env) throw BAIL; // placeholder write = side effect
-          const assignIdx = parts.findIndex(c => c.type === "Assign");
-          env.set(target.text, evalNode(parts[assignIdx + 1], envs));
+          const opNode = parts.find(c => c.type === "Assign" || c.type === "CompoundAssignOp");
+          if (!opNode) throw BAIL;
+          const opIdx = parts.indexOf(opNode);
+          const rhs = evalNode(parts[opIdx + 1], envs);
+          const result =
+            opNode.type === "CompoundAssignOp" ? (
+              opNode.text[0] === "+" ? env.get(target.text)! + rhs :
+              opNode.text[0] === "-" ? env.get(target.text)! - rhs :
+              opNode.text[0] === "*" ? env.get(target.text)! * rhs :
+              opNode.text[0] === "/" ? env.get(target.text)! / rhs :
+              ic10_mod(env.get(target.text)!, rhs)
+            ) : rhs;
+          env.set(target.text, result);
           return;
         }
         case "Return": {
@@ -1685,6 +1717,7 @@ export function compile(ast: SyntaxNode,
 
   function processStatement(statement: SyntaxNode) {
     const parts = kids(statement);
+    
     switch (statement.type) {
       case "Declaration": {
         const nameNode = parts.find(c => c.type === "VariableName");
@@ -1709,10 +1742,28 @@ export function compile(ast: SyntaxNode,
       }
       case "Assignment": {
         const target = parts[0];
-        const assignIdx = parts.findIndex(c => c.type === "Assign");
-        const expression = assignIdx >= 0 ? parts[assignIdx + 1] : undefined;
-        if (!target || !expression) throw error("Malformed assignment", statement);
-        const value = compileExpression(expression);
+        const opNode = parts.find(c => c.type === "Assign" || c.type === "CompoundAssignOp");
+        const opIdx = opNode ? parts.indexOf(opNode) : -1;
+        const expression = opIdx >= 0 ? parts[opIdx + 1] : undefined;
+        if (!target || !opNode || !expression) throw error("Malformed assignment", statement);
+
+        // x += e / x -= e reads as `x = x + e` / `x = x - e`. Synthesizing a
+        // BinaryOp node and handing it to the ordinary expression compiler
+        // reuses its folding, algebraic identities (`+= 0` is free), and
+        // register-pressure evaluation order for free instead of duplicating
+        // that logic here.
+        // const compoundOp = opNode.type === "PlusAssign" ? "+" : opNode.type === "MinusAssign" ? "-" : null;
+        
+        const opText = opNode.type === "CompoundAssignOp" ? opNode.text[0] : null;
+        const value = opText
+          ? compileExpression({
+              type: "BinaryOp",
+              text: statement.text,
+              from: statement.from,
+              to: statement.to,
+              children: [target, { type: OP_TYPES[opText], text: opText, from: opNode.from, to: opNode.to, children: [] }, expression],
+            })
+          : compileExpression(expression);
 
         if (target.type === "VariableName") {
           const symbol = lookup(target.text);
@@ -1727,6 +1778,7 @@ export function compile(ast: SyntaxNode,
           }
           break;
         }
+
 
         // Device and device-group writes
         const { base, prop, index } = propertyParts(target);
@@ -2677,3 +2729,4 @@ function removeLabelsFromCode(output: string) {
 
   return lines.join("\n");
 }
+

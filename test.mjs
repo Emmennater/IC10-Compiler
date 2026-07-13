@@ -1360,6 +1360,59 @@ const cases = {
       "move d 100",
     ],
   },
+  // Compound assignment (+= / -=)
+  "compound assignments (all)": {
+    source: [
+      "let x = a",
+      "x += 2",
+      "x -= 3",
+      "x *= -12",
+      "x /= 4",
+      "x %= 5",
+      "b = x",
+    ],
+    expected: [
+      "move r0 a",
+      "add r0 r0 2",
+      "sub r0 r0 3",
+      "mul r0 r0 -12",
+      "div r0 r0 4",
+      "mod r0 r0 5",
+      "move b r0",
+    ]
+  },
+  "compound assignment folds through constants": {
+    source: "let x = 5\nx += 3\nc = x",
+    expected: "move c 8",
+  },
+  "minus-assign folds through constants": {
+    source: "let x = 5\nx -= 3\nc = x",
+    expected: "move c 2",
+  },
+  "compound assignment on placeholders reads then writes back": {
+    source: "b += 1",
+    expected: "move r0 b\nadd r0 r0 1\nmove b r0",
+  },
+  "adding zero via += is a complete no-op": {
+    source: "let x = 5\nx += 0\nc = x",
+    expected: "move c 5",
+  },
+  "compound assignment on a device reads, modifies, and writes back": {
+    source: [
+      "device pump = d0",
+      "pump.Setting += 1",
+    ],
+    expected: [
+      "alias pump d0",
+      "l r0 pump Setting",
+      "add r0 r0 1",
+      "s pump Setting r0",
+    ],
+  },
+  "compound assignment is mod, not remainder": {
+    source: "a = -5 % 3",
+    expected: "move a 1",
+  },
   "globals initialize before loops that call functions": {
     source: [
       "device housing = db",

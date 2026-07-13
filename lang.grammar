@@ -19,7 +19,10 @@ DeviceDeclaration { kw<"device"> VariableName Assign Device }
 
 Definition { kw<"define"> VariableName Assign expression }
 
-Assignment { (VariableName | DeviceProperty | DeviceChannelProperty | DeviceNameProperty) Assign expression }
+Assignment {
+  (VariableName | DeviceProperty | DeviceChannelProperty | DeviceNameProperty)
+  (Assign | CompoundAssignOp) expression
+}
 
 If { kw<"if"> expression kw<"then"> block }
 
@@ -89,13 +92,14 @@ Bool { kw_<"true"> | kw_<"false"> }
   spaces { @whitespace }
   Number { @digit+ ("." | "." @digit+)? }
   Integer { @digit+ }
-  MulOp { "*" | "/" }
+  MulOp { "*" | "/" | "%" }
   AddOp { "+" | "-" }
   Not { "!" }
   CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
   LogicAnd { "&&" }
   LogicOr { "||" }
   Assign { "=" }
+  CompoundAssignOp { "+=" | "-=" | "*=" | "/=" | "%=" }
   ParenLeft { "(" }
   ParenRight { ")" }
   BracketLeft { "[" }
