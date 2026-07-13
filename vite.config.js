@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/Compiler/',
+  base: '/IC10-Compiler/',
 });
