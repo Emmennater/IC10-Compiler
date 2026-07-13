@@ -121,7 +121,8 @@ const lang = LRLanguage.define({
       styleTags({
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign UnaryOp \
         UnaryAdd BracketLeft BracketRight Dot": t.operator,
-        "let if then elif else end loop while do repeat until break continue define device": t.keyword,
+        "let if then elif else end loop while do repeat until break continue define device \
+        fn return At DirectiveName": t.keyword,
         "Instruction FunctionName": t.function(t.variableName),
         "Number Integer": t.number,
         Bool: t.bool,

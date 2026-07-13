@@ -9,7 +9,8 @@ block { statement* }
 
 statement {
   Declaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
-  kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition
+  kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
+  FunctionDef | Return | PreprocessorDirective
 }
 
 Declaration { kw<"let"> VariableName (Assign expression)? }
@@ -38,12 +39,26 @@ Instruction { kw_<"yield"> | kw_<"sleep"> expression }
 
 FunctionCall { FunctionName !call ParenLeft expression (Comma expression)* ParenRight }
 
+FunctionDef {
+  kw<"fn"> FunctionName !call ParenLeft VariableName (Comma VariableName)* ParenRight FunctionBlock
+  kw<"end">
+}
+
+FunctionBlock { block }
+
+Return { kw<"return"> expression }
+
+PreprocessorDirective { At DirectiveName }
+
+DirectiveName { kw_<"constexpr"> }
+
 expression { Number | Bool | VariableName | Device | DeviceProperty | DeviceChannelProperty |
   DeviceNameProperty | Parens | UnaryOp | BinaryOp | FunctionCall | String }
 
 VariableName { identifier }
 
 FunctionName { identifier }
+
 
 deviceBase { VariableName | Device }
 
@@ -86,6 +101,7 @@ Bool { kw_<"true"> | kw_<"false"> }
   BracketRight { "]" }
   Dot { "." }
   Comma { "," }
+  At { "@" }
   String { '"' (!["\\] | "\\" _)* '"' }
   Comment { "#" ![\n]* }
 }

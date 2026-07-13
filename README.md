@@ -337,6 +337,23 @@ let x = fib(6)
 ```
 Keep in mind the overhead when using functions. It isn't too much when you just have
 a single function, but when you nest them it can grow to be quite a bit!
+#### Constant Expression Functions
+Adding `@constexpr` before a function declaration will tell the compiler to try to evaluate
+the function at compile time.
+```
+@constexpr
+fn fib(n)
+  if n < 2 then
+    return n
+  else
+    return fib(n - 1) + fib(n - 2)
+  end
+end
+x = fib(10)
+```
+```
+move x 55
+```
 ### Using IC10 Functions/Variables in the High-Level Language
 Since this high level language is fully backwards compatible with IC10, this means you can use functions and variables from the standard IC10 language directly inside your code! Functions are used in place of instructions. Just pass the parameters you would normally. You may be wondering how to write IC10 without using the registers. The solution is to just use the variable names and the compiler will substitute it with the register that it has been assigned.
 ```

@@ -956,6 +956,188 @@ const cases = {
   "writing to unknown devices is an error": {
     source: "foo.On = 1",
     error: "Line 0: Unknown device or define foo",
+  },
+  // User-defined functions
+  "defining and calling functions": {
+    source: [
+      "fn hypot(a, b)",
+      "  return sqrt(a * a + b * b)", // sqrt <reg> <reg|number> aligns with our compiler
+      "end",
+      "x = hypot(1, 2)",
+      "y = hypot(x, 3)",
+    ],
+    expected: "todo",
+  },
+  "functions calling functions (reduced order)": {
+    source: [
+      "fn min(a, b)",
+      "  if a < b then",
+      "    return a",
+      "  else",
+      "    return b",
+      "end",
+      "fn max(a, b)",
+      "  return -min(-a, -b)",
+      "end",
+      "fn constrain(value, min, max)",
+      "  return min(max(value, min), max)",
+      "end",
+      "x = constrain(a, 2, 3) + constrain(b, 5, 6)",
+    ],
+    expected: "todo",
+  },
+  "functions calling functions (full order)": {
+    order: FULL_ORDER,
+    source: [
+      "fn min(a, b)",
+      "  if a < b then",
+      "    return a",
+      "  else",
+      "    return b",
+      "end",
+      "fn max(a, b)",
+      "  return -min(-a, -b)",
+      "end",
+      "fn constrain(value, min, max)",
+      "  return min(max(value, min), max)",
+      "end",
+      "x = constrain(a, 2, 3) + constrain(b, 5, 6)",
+    ],
+    expected: "todo",
+  },
+  "parameterless functions": {
+    source: [
+      "fn update()",
+      "  x = x + 1",
+      "end",
+      "update()",
+      "sleep 10",
+      "update()",
+    ],
+    expected: [
+      "j ProgramStart",
+      "update:",
+      "move r0 x",
+      "add r0 r0 1",
+      "move x r0",
+      "j ra",
+      "ProgramStart:",
+      "jal update",
+      "sleep 10",
+      "jal update",
+    ]
+  },
+  "recursive functions": {
+    // These types of functions need to be treated differently than other functions
+    // since they are register hungry.
+    // If supporting these types of functions comprimises efficient stack management
+    // elsewhere, then it may not be worth it.
+    source: [
+      "fn fib(n)",
+      "  if n < 2 then",
+      "    return n",
+      "  else",
+      "    return fib(n - 1) + fib(n - 2)",
+      "  end",
+      "end",
+      "x = fib(10)",
+    ],
+    expected: "todo",
+  },
+  "mutually recursive functions": {
+    source: [
+      "fn even(n)",
+      "  if n == 0 then",
+      "    return true",
+      "  else",
+      "    return odd(n - 1)",
+      "  end",
+      "end",
+      "fn odd(n)",
+      "  if n == 0 then",
+      "    return false",
+      "  else",
+      "    return even(n - 1)",
+      "  end",
+      "end",
+      "x = even(10)",
+    ],
+    expected: "todo",
+  },
+  "inlining functions that are only used once": {
+    source: [
+      "fn manhattan(a, b)",
+      "  return abs(a) + abs(b)",
+      "end",
+      "x = manhattan(a, b)",
+    ],
+    expected: [
+      "move r0 a",
+      "abs r0 r0",
+      "move r1 b",
+      "abs r1 r1",
+      "add r0 r0 r1",
+      "move x r0",
+    ],
+  },
+  "constant expression functions": {
+    // A special preprocessor directive (@constexpr) should be used to mark functions
+    // that should be evaluated at compile time if possible.
+    source: [
+      "@constexpr",
+      "fn fib(n)",
+      "  if n < 2 then",
+      "    return n",
+      "  else",
+      "    return fib(n - 1) + fib(n - 2)",
+      "  end",
+      "end",
+      "x = fib(10)",
+    ],
+    expected: "move x 55",
+  },
+  "functions calling multiple functions (full order)": {
+    order: FULL_ORDER,
+    source: [
+      "fn baz(a, b)",
+      "  return a > b",
+      "end",
+      "fn bar(a, b)",
+      "  return !baz(b, a)",
+      "end",
+      "fn foo(a, b, c)",
+      "  return bar(a, b) && baz(b, c)",
+      "end",
+      "x = foo(-2, 0, 4)",
+    ],
+    expected: "todo",
+  },
+  "functions with many variables": {
+    source: [
+      "fn foo(a, b, c)",
+      "  let x = a * 2 + 1",
+      "  let y = x + c",
+      "  let z = a * y + b",
+      "  let w = b * z - 4",
+      "  return w",
+      "end",
+      "x = foo(1, 2, 3)",
+    ]
+  },
+  "functions with loops": {
+    source: [
+      "fn triangle(n)",
+      "  let x = 0",
+      "  let sum = 0",
+      "  while x < n do",
+      "    x = x + 1",
+      "    sum = sum + x",
+      "  end",
+      "  return sum",
+      "end",
+      "x = triangle(6)",
+    ],
+    expected: "todo",
   }
 };
 

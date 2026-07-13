@@ -54,4 +54,12 @@ export const
   DeviceDeclaration = 52,
   device = 53,
   Definition = 54,
-  define = 55
+  define = 55,
+  FunctionDef = 56,
+  fn = 57,
+  FunctionBlock = 58,
+  Return = 59,
+  _return = 60,
+  PreprocessorDirective = 61,
+  At = 62,
+  DirectiveName = 63
