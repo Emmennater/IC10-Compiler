@@ -344,6 +344,32 @@ const output = new EditorView({
   parent: document.querySelector('#output')
 });
 
+export function initListeners() {
+  // Editor scrolling
+  const scrollerEditor = editor.scrollDOM;
+
+  const resizeEditor = new ResizeObserver(() => {
+    scrollerEditor.style.setProperty(
+      "--scroll-padding",
+      `${scrollerEditor.clientHeight - editor.defaultLineHeight}px`
+    );
+  });
+
+  resizeEditor.observe(scrollerEditor);
+
+  // Output scrolling
+  const scrollerOutput = output.scrollDOM;
+
+  const resizeOutput = new ResizeObserver(() => {
+    scrollerOutput.style.setProperty(
+      "--scroll-padding",
+      `${scrollerOutput.clientHeight - output.defaultLineHeight}px`
+    );
+  });
+
+  resizeOutput.observe(scrollerOutput);
+}
+
 function updateTextEditor(view, text) {
   view.dispatch({
     changes: {

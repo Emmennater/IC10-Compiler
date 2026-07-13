@@ -1,6 +1,6 @@
 import { compile, CompileError } from "./compiler.ts";
 import { getAST } from "./ast.js";
-import { editor, output, updateTextEditor } from "./codemirror.js";
+import { editor, output, updateTextEditor, initListeners } from "./codemirror.js";
 import { setup } from "./save-load.js"
 
 const LINE_LIMIT = 128;
@@ -34,4 +34,5 @@ function run() {
   stats.classList.toggle("over-limit", lineCount > LINE_LIMIT || byteCount > BYTE_LIMIT);
 }
 
+initListeners();
 setup(run);
