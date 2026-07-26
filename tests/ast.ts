@@ -4,7 +4,7 @@
  * included where position matters).
  */
 
-import type { SyntaxNode } from "../syntax.ts";
+import type { SyntaxNode } from "../compiler/syntax.ts";
 
 export function node(type: string, text: string, ...children: SyntaxNode[]): SyntaxNode {
   return { type, text, from: 0, to: 0, children };

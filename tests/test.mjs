@@ -1,6 +1,6 @@
 // Compiler regression tests: node test.mjs
-import { getAST } from "../ast.ts";
-import { compile, CompileError } from "../index.ts";
+import { getAST } from "../compiler/ast.ts";
+import { compile, CompileError } from "../compiler/index.ts";
 
 // The default register pool is whatever VAR_REGISTER_ORDER is set to in
 // compiler.ts (currently r0-r2). Cases that exercise the full register file

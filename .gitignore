@@ -1,6 +1,5 @@
 node_modules/
 dist/
 .claude/
-removed/
 CLAUDE.md
 package-lock.json

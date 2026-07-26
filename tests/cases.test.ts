@@ -7,10 +7,10 @@
 import { describe, it, expect } from "vitest";
 import * as original from "./original.ts";
 import * as patched from "./original-patched.ts";
-import { compile as refactored } from "../index.ts";
+import { compile as refactored } from "../compiler/index.ts";
 import { CASES } from "./cases.ts";
-import { VAR_REGISTER_ORDER } from "../tables.ts";
-import type { SyntaxNode } from "../syntax.ts";
+import { VAR_REGISTER_ORDER } from "../compiler/tables.ts";
+import type { SyntaxNode } from "../compiler/syntax.ts";
 
 type FullConfig = { removeLabels: boolean; registerOrder: number[] };
 

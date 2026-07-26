@@ -9,7 +9,7 @@
  *  - every string in `expect` appears in the refactored output
  */
 
-import type { SyntaxNode } from "../syntax.ts";
+import type { SyntaxNode } from "../compiler/syntax.ts";
 import {
   assign, bin, bool, brk, compound, constexprDirective, cont, decl, defineStmt,
   device, deviceDecl, elifArm, elseArm, fnCall, fnDef, ifArm, ifExpr, int,

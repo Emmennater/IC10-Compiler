@@ -1,4 +1,4 @@
-import { getAST } from "./ast.ts";
+import { getAST } from "./compiler/ast.ts";
 import { compile, CompileError } from "./compiler/index.ts";
 
 const DEFAULT_SOURCE = `
