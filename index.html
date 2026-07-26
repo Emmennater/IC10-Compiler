@@ -1,23 +1,39 @@
 <!DOCTYPE html>
-<html>
-  <head>
-  <meta charset="utf-8">
-  <title>IC10 compiler</title>
-  <link rel="stylesheet" href="/main.css">
-  </head>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compiler</title>
+  <link rel="stylesheet" href="main.css">
+</head>
 <body>
-  <h1>IC10 Compiler</h1>
-  <button id="compile">Compile</button>
-  <div class="row">
-    <div class="col">
-      <h2>Source</h2>
-      <textarea id="source" spellcheck="false"></textarea>
-    </div>
-    <div class="col">
-      <h2>Output</h2>
-      <pre id="output"></pre>
-    </div>
-  </div>
-  <script type="module" src="/main.js"></script>
+  <script type="module" src="main.js"></script>
+  <hbox>
+    <vbox id="compiler-wrapper" class="panel">
+      <h1>
+        <span class="title"><span>Compiler</span> // v2.0</span>
+        <span class="script-controls">
+          <span id="saved-icon"></span>
+          <select id="script-select" title="Load a saved script"></select>
+          <button id="script-rename" title="Rename this script">Rename</button>
+          <button id="script-save" title="Save this script in the browser">Save</button>
+          <button id="script-new" title="Start a new script">New</button>
+          <button id="script-delete" title="Delete the selected script">Delete</button>
+          <button id="script-run" title="Run the script">Run</button>
+        </span>
+      </h1>
+      <div id="editor" class="editor"></div>
+    </vbox>
+    <vbox id="ic10-wrapper" class="panel">
+      <h1>
+        <span class="title ic10">IC10</span>
+        <span id="stats"></span>
+        <span class="script-controls">
+          <button id="copy-output" title="Copy the output to the clipboard">Copy</button>
+        </span>
+      </h1>  
+      <div id="output" class="editor"></div>
+    </vbox>
+  </hbox>
 </body>
 </html>

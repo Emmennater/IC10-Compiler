@@ -9,14 +9,24 @@
     "test": "vitest run",
     "test:cases": "node tests/test.mjs",
     "lezer": "lezer-generator lezer/lang.grammar -o lezer/parser.js",
-    "lezer:original": "lezer-generator lezer/lang-original.grammar -o lezer/parser-original.js"
+    "lezer:original": "lezer-generator lezer/lang-original.grammar -o lezer/parser-original.js",
+    "lezer:ic10": "lezer-generator lezer/ic10.grammar -o lezer/parser-ic10.js"
   },
   "dependencies": {
     "@lezer/common": "^1.5.2",
     "@lezer/lr": "^1.4.10"
   },
   "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.6",
+    "codemirror": "^6.0.2",
     "@lezer/generator": "^1.8.0",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/lr": "^1.4.10",
     "typescript": "^5.9.3",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"

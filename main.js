@@ -1,35 +1,38 @@
-import { getAST } from "./compiler/ast.ts";
 import { compile, CompileError } from "./compiler/index.ts";
-import { getFormalAST } from "./compiler/formal-ast.ts";
+import { getAST } from "./compiler/ast.ts";
+import { editor, output, updateTextEditor, initListeners } from "./codemirror.js";
+import { setup } from "./save-load.js"
 
-const DEFAULT_SOURCE = `
-let x[10]
-let i = 0
-while i < 10 do
-  x[i] = i
-  i += 1
-end
-`.substring(1);
+const LINE_LIMIT = 128;
+const BYTE_LIMIT = 4096;
 
-const sourceEl = document.getElementById("source");
-const outputEl = document.getElementById("output");
-const compileEl = document.getElementById("compile");
+const stats = document.querySelector("#stats");
 
-sourceEl.value = DEFAULT_SOURCE;
+function run() {
+  const txt = editor.state.doc.toString();
 
-function compileCurrentSource() {
-  const source = sourceEl.value;
-  outputEl.classList.remove("error");
+  let ic10;
   try {
-    const ast = getAST(source);
-    const formalAST = getFormalAST(ast);
-    // console.log(formalAST);
-    outputEl.textContent = compile(ast, { removeLabels: true });
+    let ast = getAST(txt);
+    // console.log(ast);
+    let config = { removeLabels: true };
+    ic10 = compile(ast, config);
   } catch (e) {
-    outputEl.classList.add("error");
-    outputEl.textContent = e instanceof CompileError ? e.message : String(e);
+    if (e instanceof CompileError) {
+      updateTextEditor(output, `# ${e.message}`);
+      stats.textContent = "";
+      return;
+    }
+    throw e;
   }
+
+  updateTextEditor(output, ic10);
+
+  const lineCount = ic10 === "" ? 0 : ic10.split("\n").length;
+  const byteCount = new TextEncoder().encode(ic10).length;
+  stats.textContent = `${lineCount}/${LINE_LIMIT} lines · ${byteCount}/${BYTE_LIMIT} bytes`;
+  stats.classList.toggle("over-limit", lineCount > LINE_LIMIT || byteCount > BYTE_LIMIT);
 }
 
-compileEl.addEventListener("click", compileCurrentSource);
-compileCurrentSource();
+initListeners();
+setup(run);
