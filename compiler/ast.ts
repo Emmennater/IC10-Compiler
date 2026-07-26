@@ -1,12 +1,20 @@
 import { parser } from "../lezer/parser.js";
 import type { TreeCursor } from "@lezer/common";
 
-/** One node of the parse tree produced by the language grammar. */
-export type SyntaxNode = {
-  type: string;
-  text: string;
+/**
+ * A span of the source text. Everything downstream of parsing — diagnostics,
+ * IR instructions — only ever needs this much of a node, so both the raw
+ * parse tree and the typed tree in formal-ast.ts satisfy it.
+ */
+export type SourceRange = {
   from: number;
   to: number;
+};
+
+/** One node of the parse tree produced by the language grammar. */
+export type SyntaxNode = SourceRange & {
+  type: string;
+  text: string;
   children: SyntaxNode[];
 };
 
@@ -15,7 +23,7 @@ export class CompileError extends Error {
   readonly from: number;
   readonly to: number;
 
-  constructor(message: string, node: SyntaxNode) {
+  constructor(message: string, node: SourceRange) {
     super(message);
     this.name = "CompileError";
     this.from = node.from;

@@ -1,16 +1,16 @@
 /**
  * Compile-time constant folding and register-pressure estimation.
  *
- * Both are pure functions over the parse tree. Neither emits code, mutates
+ * Both are pure functions over the formal AST. Neither emits code, mutates
  * anything, or knows what a virtual register is; the only thing they need
  * from the rest of the compiler is the answer to a question about a name,
  * which arrives as a one-method callback. That keeps this module readable
  * and testable on its own, with a hand-built node and a stub scope.
  */
 
-import { kids, EXPRESSION_TYPES, type SyntaxNode } from "./syntax.ts";
+import type { Expression } from "./formal-ast.ts";
 import { constBoolOp, constOp, type ConstOperand } from "./ir.ts";
-import { applyArithmetic, compare, isArithmetic, isComparison } from "./tables.ts";
+import { applyArithmetic, compare } from "./tables.ts";
 
 /** What folding needs to know about a name: its constant value, if any. */
 export type ConstantLookup = (name: string) => ConstOperand | null;
@@ -32,53 +32,47 @@ export function foldTruthy(operand: ConstOperand | null): boolean | null {
  * Returns null whenever the value is not known at compile time, including
  * for anything involving devices, placeholders, or calls.
  */
-export function foldExpression(node: SyntaxNode, constantOf: ConstantLookup): ConstOperand | null {
+export function foldExpression(node: Expression, constantOf: ConstantLookup): ConstOperand | null {
   switch (node.type) {
-    case "Number":
-      return constOp(parseFloat(node.text));
-    case "Bool":
-      return constBoolOp(node.text === "true");
-    case "VariableName":
-      return constantOf(node.text);
-    case "Parens": {
-      const inner = kids(node).find(c => EXPRESSION_TYPES.has(c.type));
-      return inner ? foldExpression(inner, constantOf) : null;
-    }
-    case "UnaryOp": {
-      const [op, operand] = kids(node);
-      const value = foldExpression(operand, constantOf);
+    case "constant":
+      return constOp(node.value);
+    case "bool":
+      return constBoolOp(node.value);
+    case "identifier":
+      return constantOf(node.name);
+    case "unaryop": {
+      const value = foldExpression(node.value, constantOf);
       if (!value) return null;
-      if (op.text === "-") return constOp(-parseFloat(value.text));
-      if (op.text === "!") return constBoolOp(parseFloat(value.text) === 0);
-      return value;
+      if (node.opcode === "neg") return constOp(-parseFloat(value.text));
+      if (node.opcode === "not") return constBoolOp(parseFloat(value.text) === 0);
+      return value; // unary `+` is identity
     }
-    case "BinaryOp": {
-      const [left, opNode, right] = kids(node);
-      const op = opNode.text;
-      const a = foldExpression(left, constantOf);
-      const b = foldExpression(right, constantOf);
-      if (op === "&&") {
-        const truthyA = foldTruthy(a);
-        const truthyB = foldTruthy(b);
-        if (truthyA === false || truthyB === false) return constBoolOp(false);
-        if (truthyA === true && truthyB === true) return constBoolOp(true);
-        return null;
-      }
-      if (op === "||") {
-        const truthyA = foldTruthy(a);
-        const truthyB = foldTruthy(b);
-        if (truthyA === true || truthyB === true) return constBoolOp(true);
-        if (truthyA === false && truthyB === false) return constBoolOp(false);
-        return null;
-      }
+    case "binaryop": {
+      const a = foldExpression(node.left, constantOf);
+      const b = foldExpression(node.right, constantOf);
       if (!a || !b) return null;
-      const x = parseFloat(a.text);
-      const y = parseFloat(b.text);
-      if (isArithmetic(op)) return constOp(applyArithmetic(op, x, y));
-      if (isComparison(op)) return constBoolOp(compare(op, x, y));
+      return constOp(applyArithmetic(node.opcode, parseFloat(a.text), parseFloat(b.text)));
+    }
+    case "comparisonop": {
+      const a = foldExpression(node.left, constantOf);
+      const b = foldExpression(node.right, constantOf);
+      if (!a || !b) return null;
+      return constBoolOp(compare(node.opcode, parseFloat(a.text), parseFloat(b.text)));
+    }
+    case "logicalop": {
+      const a = foldTruthy(foldExpression(node.left, constantOf));
+      const b = foldTruthy(foldExpression(node.right, constantOf));
+      if (node.opcode === "and") {
+        if (a === false || b === false) return constBoolOp(false);
+        if (a === true && b === true) return constBoolOp(true);
+        return null;
+      }
+      if (a === true || b === true) return constBoolOp(true);
+      if (a === false && b === false) return constBoolOp(false);
       return null;
     }
     default:
+      // Strings, devices, property reads and calls only exist at run time.
       return null;
   }
 }
@@ -90,42 +84,34 @@ export function foldExpression(node: SyntaxNode, constantOf: ConstantLookup): Co
  * code quality, never correctness. Real allocation happens later over the
  * whole program.
  */
-export function pressure(node: SyntaxNode, isKnownName: KnownNameLookup): number {
+export function pressure(node: Expression, isKnownName: KnownNameLookup): number {
   switch (node.type) {
-    case "Number":
-    case "Bool":
-    case "String":
-    case "Device":
+    case "constant":
+    case "bool":
+    case "string":
+    case "device":
       return 0;
-    case "DeviceProperty": {
-      const base = kids(node)[0];
+    case "deviceprop":
       // Game constants are inline; device reads occupy a register
-      if (base.type !== "Device" && !isKnownName(base.text)) return 0;
+      if (node.device.type === "identifier" && !isKnownName(node.device.name)) return 0;
       return 1;
-    }
-    case "DeviceChannelProperty":
-    case "DeviceNameProperty":
-    case "FunctionCall":
+    case "devicechannelprop":
+    case "devicenameprop":
+    case "functioncall":
       return 1;
-    case "VariableName":
+    case "identifier":
       // Placeholders must be loaded into a register; variables are free
-      return isKnownName(node.text) ? 0 : 1;
-    case "Parens": {
-      const inner = kids(node).find(c => EXPRESSION_TYPES.has(c.type));
-      return inner ? pressure(inner, isKnownName) : 0;
+      return isKnownName(node.name) ? 0 : 1;
+    case "unaryop": {
+      const inner = pressure(node.value, isKnownName);
+      return node.opcode === "pos" ? inner : Math.max(inner, 1);
     }
-    case "UnaryOp": {
-      const [op, operand] = kids(node);
-      const inner = pressure(operand, isKnownName);
-      return op.text === "+" ? inner : Math.max(inner, 1);
-    }
-    case "BinaryOp": {
-      const [left, , right] = kids(node);
-      const a = pressure(left, isKnownName);
-      const b = pressure(right, isKnownName);
+    case "binaryop":
+    case "comparisonop":
+    case "logicalop": {
+      const a = pressure(node.left, isKnownName);
+      const b = pressure(node.right, isKnownName);
       return Math.max(a === b ? a + 1 : Math.max(a, b), 1);
     }
-    default:
-      return 0;
   }
 }

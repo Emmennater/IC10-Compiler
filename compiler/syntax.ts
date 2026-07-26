@@ -1,20 +1,22 @@
 /**
- * Parse-tree types and AST navigation helpers.
+ * Parse-tree types, diagnostics, and the little that still reads the raw
+ * concrete syntax tree.
  *
- * The compiler consumes a Lezer-style concrete syntax tree: every node
- * carries its type name, source text, source range, and children (including
- * keyword and punctuation tokens). The helpers here are the only place that
- * knows how statements, conditions, and blocks are laid out inside a node.
+ * The Lezer tree keeps every keyword and punctuation token, and inlines
+ * blocks into their container. Only `formal-ast.ts` interprets that shape;
+ * everything downstream of it works on the typed tree instead, so the
+ * navigation helpers that used to live here (`blockOf`, `conditionOf`,
+ * `statementsIn`) moved there with it.
  *
  * `SyntaxNode` and `CompileError` are defined in ast.ts (next to the actual
  * Lezer parser that produces them) and re-exported here so the rest of the
  * pipeline keeps importing them from "./syntax" as before.
  */
 
-import { CompileError, type SyntaxNode } from "./ast.ts";
+import { CompileError, type SourceRange, type SyntaxNode } from "./ast.ts";
 
 export { CompileError };
-export type { SyntaxNode };
+export type { SourceRange, SyntaxNode };
 
 /**
  * Creates CompileErrors whose messages carry the 0-based source line
@@ -34,7 +36,7 @@ export class ErrorReporter {
   }
 
   /** The 0-based line containing the node's start position. */
-  lineOf(node: SyntaxNode): number {
+  lineOf(node: SourceRange): number {
     const position = Math.min(node.from, this.sourceLength);
     // Rightmost line start at or before `position`
     let low = 0;
@@ -47,7 +49,7 @@ export class ErrorReporter {
     return low;
   }
 
-  error(message: string, node: SyntaxNode): CompileError {
+  error(message: string, node: SourceRange): CompileError {
     return new CompileError(`Line ${this.lineOf(node)}: ${message}`, node);
   }
 }
@@ -78,52 +80,3 @@ export function checkSyntax(node: SyntaxNode, errors: ErrorReporter): void {
   for (const child of node.children) checkSyntax(child, errors);
 }
 
-/** Statement children between two keyword tokens (either side optional). */
-export function statementsIn(
-  node: SyntaxNode,
-  afterKeyword: string | null,
-  beforeKeyword: string | null,
-): SyntaxNode[] {
-  const parts = kids(node);
-  let start = 0;
-  let end = parts.length;
-  if (afterKeyword) {
-    const i = parts.findIndex(c => c.type === afterKeyword);
-    if (i >= 0) start = i + 1;
-  }
-  if (beforeKeyword) {
-    const i = parts.findIndex(c => c.type === beforeKeyword);
-    if (i >= 0) end = i;
-  }
-  return parts.slice(start, end).filter(c => STATEMENT_TYPES.has(c.type));
-}
-
-/**
- * The statement body of a construct. Function calls are both statements
- * and expressions, so bodies are delimited by keywords, not by node type.
- */
-export function blockOf(node: SyntaxNode): SyntaxNode[] {
-  switch (node.type) {
-    case "If":
-    case "ElseIf":
-      return statementsIn(node, "then", null);
-    case "WhileExpr":
-      return statementsIn(node, "do", null);
-    case "RepeatUntilExpr":
-      return statementsIn(node, "repeat", "until");
-    default: // Else, LoopExpr
-      return statementsIn(node, null, null);
-  }
-}
-
-/** The condition expression of an if/elif/while/repeat construct. */
-export function conditionOf(node: SyntaxNode): SyntaxNode | null {
-  const parts = kids(node);
-  if (node.type === "RepeatUntilExpr") {
-    const i = parts.findIndex(c => c.type === "until");
-    return parts.slice(i + 1).find(c => EXPRESSION_TYPES.has(c.type)) ?? null;
-  }
-  const boundary = node.type === "WhileExpr" ? "do" : "then";
-  const i = parts.findIndex(c => c.type === boundary);
-  return parts.slice(0, i < 0 ? parts.length : i).find(c => EXPRESSION_TYPES.has(c.type)) ?? null;
-}

@@ -4,7 +4,7 @@
  * later phase (dead code elimination, allocation, rendering) shares.
  */
 
-import type { SyntaxNode } from "./syntax.ts";
+import type { SourceRange } from "./syntax.ts";
 
 // ------------------------------ operands --------------------------------
 
@@ -54,26 +54,26 @@ export function isZero(operand: Operand): boolean {
  * refers to instructions by id ranges.
  */
 export type Inst =
-  | { id: number; op: "alu"; opcode: string; dest: number; args: Operand[]; node: SyntaxNode }
-  | { id: number; op: "movev"; dest: number; src: Operand; node: SyntaxNode }
-  | { id: number; op: "loadname"; dest: number; name: string; node: SyntaxNode }
-  | { id: number; op: "storename"; name: string; src: Operand; node: SyntaxNode }
-  | { id: number; op: "get"; dest: number; addr: number; node: SyntaxNode }
-  | { id: number; op: "poke"; addr: number; src: Operand; node: SyntaxNode }
+  | { id: number; op: "alu"; opcode: string; dest: number; args: Operand[]; node: SourceRange }
+  | { id: number; op: "movev"; dest: number; src: Operand; node: SourceRange }
+  | { id: number; op: "loadname"; dest: number; name: string; node: SourceRange }
+  | { id: number; op: "storename"; name: string; src: Operand; node: SourceRange }
+  | { id: number; op: "get"; dest: number; addr: number; node: SourceRange }
+  | { id: number; op: "poke"; addr: number; src: Operand; node: SourceRange }
   // A raw IC10 instruction (yield, sleep, l, s, ls, lb, user calls, ...).
   // With a dest it is a pure value producer (dest is the first operand);
   // without one it is a side effect and always survives.
-  | { id: number; op: "call"; opcode: string; dest: number | null; args: Operand[]; node: SyntaxNode }
+  | { id: number; op: "call"; opcode: string; dest: number | null; args: Operand[]; node: SourceRange }
   // alias/define lines survive only if their name is used by kept code
-  | { id: number; op: "alias"; name: string; device: string; node: SyntaxNode }
-  | { id: number; op: "definedef"; name: string; value: string; node: SyntaxNode }
-  | { id: number; op: "label"; name: string; node: SyntaxNode }
-  | { id: number; op: "jump"; target: string; node: SyntaxNode }
-  | { id: number; op: "branch"; opcode: string; args: Operand[]; target: string; node: SyntaxNode }
+  | { id: number; op: "alias"; name: string; device: string; node: SourceRange }
+  | { id: number; op: "definedef"; name: string; value: string; node: SourceRange }
+  | { id: number; op: "label"; name: string; node: SourceRange }
+  | { id: number; op: "jump"; target: string; node: SourceRange }
+  | { id: number; op: "branch"; opcode: string; args: Operand[]; target: string; node: SourceRange }
   // Function call/return: jal jumps to the function's label and comes back;
   // ret emits `j ra`. Parameters and results travel through shared vregs.
-  | { id: number; op: "jal"; target: string; node: SyntaxNode }
-  | { id: number; op: "ret"; fn: string; node: SyntaxNode };
+  | { id: number; op: "jal"; target: string; node: SourceRange }
+  | { id: number; op: "ret"; fn: string; node: SourceRange };
 
 /** Omit that distributes over a union instead of collapsing it. */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

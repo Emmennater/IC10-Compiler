@@ -11,7 +11,7 @@
  * for the future function call stack.
  */
 
-import type { ErrorReporter, SyntaxNode } from "./syntax.ts";
+import type { ErrorReporter, SourceRange } from "./syntax.ts";
 import {
   assertNever, destOf, setDest, usesOf,
   type IdAllocator, type Inst, type Operand,
@@ -32,7 +32,7 @@ type AllocationContext = {
   ids: IdAllocator;
   errors: ErrorReporter;
   /** Fallback error position when a spill failure has no better node. */
-  rootNode: SyntaxNode;
+  rootNode: SourceRange;
 };
 
 /** One contiguous run of positions where a vreg needs its register. */
@@ -321,7 +321,7 @@ export function allocateRegisters(program: Inst[], context: AllocationContext): 
     const registerOf = new Map<number, number>();
     const active: { v: number; reg: number; end: number }[] = [];
     let victim: number | null = null;
-    let victimNode: SyntaxNode = context.rootNode;
+    let victimNode: SourceRange = context.rootNode;
 
     for (const item of items) {
       const itemStartsAtDef = startsAtDef(item);

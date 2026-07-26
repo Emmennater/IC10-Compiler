@@ -15,7 +15,7 @@
  * which scopes are visible, and where the function boundary sits.
  */
 
-import type { SyntaxNode } from "./syntax.ts";
+import type { Expression } from "./formal-ast.ts";
 import type { Operand } from "./ir.ts";
 
 /** One variable's compile-time state. */
@@ -35,7 +35,7 @@ export type Sym =
   | { kind: "define"; text: string; needsLine: boolean }
   // A read-only parameter of an inlined function: each use re-compiles the
   // argument expression in the caller's chain (textual inlining)
-  | { kind: "alias"; argNode: SyntaxNode; callerChain: ScopeChain };
+  | { kind: "alias"; argNode: Expression; callerChain: ScopeChain };
 
 export type Scope = Map<string, Sym>;
 

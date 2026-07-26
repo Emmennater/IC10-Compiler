@@ -7,9 +7,11 @@
  * whole `compile()` call belongs in the differential suite instead.
  */
 
-import { ErrorReporter, blockOf, conditionOf, kids, statementsIn } from "../compiler/syntax.ts";
-import { applyArithmetic, compare, ic10Mod, isArithmetic, isComparison } from "../compiler/tables.ts";
-import { IdAllocator, constOp, destOf, operandsOf, usesOf, hasSideEffect, symsOf } from "../compiler/ir.ts";
+import { ErrorReporter, kids } from "../compiler/syntax.ts";
+import { applyArithmetic, compare, ic10Mod } from "../compiler/tables.ts";
+import {
+  IdAllocator, assertNever, constOp, destOf, operandsOf, usesOf, hasSideEffect, symsOf,
+} from "../compiler/ir.ts";
 import { LabelFactory } from "../compiler/labels.ts";
 import { StatementScope } from "../compiler/statement-scope.ts";
 import { foldExpression, foldTruthy, pressure } from "../compiler/folding.ts";
@@ -18,7 +20,11 @@ import { resolveLabels } from "../compiler/render.ts";
 import { convergeLiveness } from "../compiler/liveness.ts";
 import type { Inst, UnnumberedInst } from "../compiler/ir.ts";
 import type { SyntaxNode } from "../compiler/syntax.ts";
-import { bin, name, num, node, str, un, ifArm, elseArm, whileExpr, repeatUntil, decl } from "./ast.ts";
+import type {
+  ArithmeticOpcode, BinaryOp, ComparisonOp, ComparisonOpcode, Constant, Expression,
+  Identifier, LogicalOp, StringExpr, UnaryOp,
+} from "../compiler/formal-ast.ts";
+import { node, num } from "./ast.ts";
 
 export type UnitResult = { name: string; pass: boolean; detail?: string };
 
@@ -47,6 +53,21 @@ function throws(label: string, body: () => unknown): void {
 const inst = (partial: UnnumberedInst, id: number): Inst => ({ ...partial, id }) as Inst;
 const dummyNode: SyntaxNode = { type: "x", text: "", from: 0, to: 0, children: [] };
 
+// Folding and pressure consume the formal AST, so their subjects are built
+// directly in it — no parser, no conversion, no pipeline.
+const at = { from: 0, to: 0 };
+const k = (value: number): Constant => ({ type: "constant", ...at, value });
+const id = (name: string): Identifier => ({ type: "identifier", ...at, name });
+const text = (value: string): StringExpr => ({ type: "string", ...at, value: `"${value}"` });
+const arith = (left: Expression, opcode: ArithmeticOpcode, right: Expression): BinaryOp =>
+  ({ type: "binaryop", ...at, left, right, opcode });
+const cmp = (left: Expression, opcode: ComparisonOpcode, right: Expression): ComparisonOp =>
+  ({ type: "comparisonop", ...at, left, right, opcode });
+const logic = (left: Expression, opcode: "and" | "or", right: Expression): LogicalOp =>
+  ({ type: "logicalop", ...at, left, right, opcode });
+const unary = (opcode: UnaryOp["opcode"], value: Expression): UnaryOp =>
+  ({ type: "unaryop", ...at, value, opcode });
+
 export function runUnitTests(): UnitResult[] {
   results.length = 0;
 
@@ -56,13 +77,12 @@ export function runUnitTests(): UnitResult[] {
   equal("ic10Mod(7, 3) === 1", ic10Mod(7, 3), 1);
   equal("ic10Mod(-7, 3) === 2 (not -1)", ic10Mod(-7, 3), 2);
   equal("ic10Mod(7, -3) === -2", ic10Mod(7, -3), -2);
-  equal("applyArithmetic % matches ic10Mod", applyArithmetic("%", -7, 3), ic10Mod(-7, 3));
-  equal("applyArithmetic /", applyArithmetic("/", 7, 2), 3.5);
-  check("isArithmetic('%')", isArithmetic("%"));
-  check("!isArithmetic('==')", !isArithmetic("=="));
-  check("isComparison('>=')", isComparison(">="));
-  check("compare('>=', 2, 2)", compare(">=", 2, 2));
-  throws("applyArithmetic rejects a non-arithmetic op", () => applyArithmetic("==", 1, 1));
+  // The tables are keyed by the opcode the formal AST resolved the operator
+  // to, so "not an arithmetic operator" is a type error, not a runtime one.
+  equal("applyArithmetic mod matches ic10Mod", applyArithmetic("mod", -7, 3), ic10Mod(-7, 3));
+  equal("applyArithmetic div", applyArithmetic("div", 7, 2), 3.5);
+  check("compare('ge', 2, 2)", compare("ge", 2, 2));
+  check("compare('gt', 2, 2) is false", !compare("gt", 2, 2));
 
   // constOp must reject values with no plain IC10 literal
   equal("constOp(1/0) is null", constOp(1 / 0), null);
@@ -84,43 +104,38 @@ export function runUnitTests(): UnitResult[] {
   // -------------------------------- syntax ------------------------------
   const withComment = node("X", "", num(1), node("Comment", "// hi"), num(2));
   equal("kids drops comments", kids(withComment).length, 2);
-  const whileNode = whileExpr(bin(name("i"), "<", num(3)), decl("a", num(1)));
-  equal("conditionOf(while) finds the condition before `do`", conditionOf(whileNode)?.type, "BinaryOp");
-  equal("blockOf(while) takes statements after `do`", blockOf(whileNode).length, 1);
-  const repeatNode = repeatUntil([decl("b", num(1))], bin(name("n"), ">", num(1)));
-  equal("blockOf(repeat) stops at `until`", blockOf(repeatNode).length, 1);
-  equal("conditionOf(repeat) reads after `until`", conditionOf(repeatNode)?.type, "BinaryOp");
-  equal("blockOf(if) takes statements after `then`", blockOf(ifArm(num(1), decl("c", num(1)))).length, 1);
-  equal("blockOf(else) takes every statement", blockOf(elseArm(decl("d", num(1)))).length, 1);
-  equal("statementsIn with no keywords", statementsIn(node("B", "", decl("e", num(1))), null, null).length, 1);
 
   // ------------------------------- folding ------------------------------
   const noConstants = () => null;
-  equal("fold 2 + 3 * 4", foldExpression(bin(num(2), "+", bin(num(3), "*", num(4))), noConstants)?.text, "14");
-  equal("fold 7 % 3 (the original's bug)", foldExpression(bin(num(7), "%", num(3)), noConstants)?.text, "1");
-  equal("fold -7 % 3", foldExpression(bin(un("-", num(7)), "%", num(3)), noConstants)?.text, "2");
-  equal("fold 1 / 0 gives null, not Infinity", foldExpression(bin(num(1), "/", num(0)), noConstants), null);
-  equal("fold comparison to 0/1", foldExpression(bin(num(2), ">", num(3)), noConstants)?.text, "0");
-  equal("fold !0", foldExpression(un("!", num(0)), noConstants)?.text, "1");
+  equal("fold 2 + 3 * 4",
+    foldExpression(arith(k(2), "add", arith(k(3), "mul", k(4))), noConstants)?.text, "14");
+  equal("fold 7 % 3 (the original's bug)",
+    foldExpression(arith(k(7), "mod", k(3)), noConstants)?.text, "1");
+  equal("fold -7 % 3",
+    foldExpression(arith(unary("neg", k(7)), "mod", k(3)), noConstants)?.text, "2");
+  equal("fold 1 / 0 gives null, not Infinity",
+    foldExpression(arith(k(1), "div", k(0)), noConstants), null);
+  equal("fold comparison to 0/1", foldExpression(cmp(k(2), "gt", k(3)), noConstants)?.text, "0");
+  equal("fold !0", foldExpression(unary("not", k(0)), noConstants)?.text, "1");
   // && / || fold when one side settles the outcome, even if the other is unknown
-  equal("fold 0 && unknown", foldExpression(bin(num(0), "&&", name("x")), noConstants)?.text, "0");
-  equal("fold 1 || unknown", foldExpression(bin(num(1), "||", name("x")), noConstants)?.text, "1");
-  equal("fold unknown && 1 stays unknown", foldExpression(bin(name("x"), "&&", num(1)), noConstants), null);
-  equal("fold string is not constant", foldExpression(str("hi"), noConstants), null);
+  equal("fold 0 && unknown", foldExpression(logic(k(0), "and", id("x")), noConstants)?.text, "0");
+  equal("fold 1 || unknown", foldExpression(logic(k(1), "or", id("x")), noConstants)?.text, "1");
+  equal("fold unknown && 1 stays unknown", foldExpression(logic(id("x"), "and", k(1)), noConstants), null);
+  equal("fold string is not constant", foldExpression(text("hi"), noConstants), null);
   // the constant lookup is the only outside knowledge folding needs
   const withK = (n: string) => (n === "k" ? ({ kind: "const", text: "5" } as const) : null);
-  equal("fold k + 1 via lookup", foldExpression(bin(name("k"), "+", num(1)), withK)?.text, "6");
-  equal("fold unknown name", foldExpression(name("other"), withK), null);
+  equal("fold k + 1 via lookup", foldExpression(arith(id("k"), "add", k(1)), withK)?.text, "6");
+  equal("fold unknown name", foldExpression(id("other"), withK), null);
   equal("foldTruthy(null)", foldTruthy(null), null);
   equal("foldTruthy(0)", foldTruthy({ kind: "const", text: "0" }), false);
 
   // pressure: known names are free, placeholders cost a register
   const known = (n: string) => n === "v";
-  equal("pressure of a literal", pressure(num(1), known), 0);
-  equal("pressure of a known variable", pressure(name("v"), known), 0);
-  equal("pressure of a placeholder", pressure(name("p"), known), 1);
-  equal("pressure of balanced binary grows", pressure(bin(name("p"), "+", name("q")), known), 2);
-  equal("pressure of unbalanced binary does not", pressure(bin(name("p"), "+", num(1)), known), 1);
+  equal("pressure of a literal", pressure(k(1), known), 0);
+  equal("pressure of a known variable", pressure(id("v"), known), 0);
+  equal("pressure of a placeholder", pressure(id("p"), known), 1);
+  equal("pressure of balanced binary grows", pressure(arith(id("p"), "add", id("q")), known), 2);
+  equal("pressure of unbalanced binary does not", pressure(arith(id("p"), "add", k(1)), known), 1);
 
   // ------------------------------- labels -------------------------------
   const labels = new LabelFactory();
@@ -172,6 +187,9 @@ export function runUnitTests(): UnitResult[] {
   check("call with dest has no side effect", !hasSideEffect(valueCall));
   equal("symsOf(call)", symsOf(valueCall), ["d0", "Setting"]);
   equal("operandsOf(label) is empty", operandsOf(inst({ op: "label", name: "L", node: dummyNode }, 4)), []);
+  // The exhaustiveness guard: only reachable if a union grew and a switch did not
+  throws("assertNever throws on a value no switch handled",
+    () => assertNever("surprise" as never, "instruction"));
 
   // ------------------------------ symbols -------------------------------
   // ScopeChain is a value: derived chains never affect the one they came

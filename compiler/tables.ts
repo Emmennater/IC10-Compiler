@@ -4,7 +4,14 @@
  *
  * Keeping the semantics in one place guarantees that "fold at compile time"
  * and "execute on the chip" agree (IC10 reference: https://stationeers-wiki.com/IC10).
+ *
+ * Everything here is keyed by the operator's *meaning* — the opcode the
+ * formal AST already resolved the source spelling to — not by the spelling
+ * itself. An arithmetic opcode is its own IC10 instruction (`add`, `mod`),
+ * so only the comparisons need tables at all.
  */
+
+import type { ArithmeticOpcode, ComparisonOpcode } from "./formal-ast.ts";
 
 /**
  * First register reserved by the ABI: r16 is sp and r17 is ra, so only
@@ -19,42 +26,24 @@ export const VAR_REGISTER_ORDER: readonly number[] =
 /** Spilled values live at fixed stack addresses growing down from here. */
 export const STACK_TOP = 511;
 
-/** Binary arithmetic operators to their IC10 opcodes. */
-export const ALU_OPCODES: Readonly<Record<string, string>> = {
-  "+": "add",
-  "-": "sub",
-  "*": "mul",
-  "/": "div",
-  "%": "mod",
-};
-
-/** Comparison operators to the opcodes producing their result as data (0/1). */
-export const SET_OPCODES: Readonly<Record<string, string>> = {
-  "==": "seq", "!=": "sne", ">": "sgt", "<": "slt", ">=": "sge", "<=": "sle",
-};
-
-/** Operator spelling to the grammar's operator node type. */
-export const OP_TYPES: Readonly<Record<string, string>> = {
-  "+": "AddOp",
-  "-": "AddOp",
-  "*": "MulOp",
-  "/": "MulOp",
-  "%": "MulOp",
+/** Comparison opcodes to the opcodes producing their result as data (0/1). */
+export const SET_OPCODES: Readonly<Record<ComparisonOpcode, string>> = {
+  eq: "seq", ne: "sne", gt: "sgt", lt: "slt", ge: "sge", le: "sle",
 };
 
 /** Branch opcodes that jump when the comparison is TRUE. */
-export const BRANCH_TRUE: Readonly<Record<string, string>> = {
-  "==": "beq", "!=": "bne", ">": "bgt", "<": "blt", ">=": "bge", "<=": "ble",
+export const BRANCH_TRUE: Readonly<Record<ComparisonOpcode, string>> = {
+  eq: "beq", ne: "bne", gt: "bgt", lt: "blt", ge: "bge", le: "ble",
 };
 
 /** Branch opcodes that jump when the comparison is FALSE. */
-export const BRANCH_FALSE: Readonly<Record<string, string>> = {
-  "==": "bne", "!=": "beq", ">": "ble", "<": "bge", ">=": "blt", "<=": "bgt",
+export const BRANCH_FALSE: Readonly<Record<ComparisonOpcode, string>> = {
+  eq: "bne", ne: "beq", gt: "ble", lt: "bge", ge: "blt", le: "bgt",
 };
 
 /** Mirror `0 OP x` into `x OP' 0` so the zero-compare forms apply. */
-export const MIRROR: Readonly<Record<string, string>> = {
-  "==": "==", "!=": "!=", ">": "<", "<": ">", ">=": "<=", "<=": ">=",
+export const MIRROR: Readonly<Record<ComparisonOpcode, ComparisonOpcode>> = {
+  eq: "eq", ne: "ne", gt: "lt", lt: "gt", ge: "le", le: "ge",
 };
 
 /** Flip a branch opcode to jump on the opposite outcome. */
@@ -63,10 +52,10 @@ export const INVERT_BRANCH: Readonly<Record<string, string>> = {
   beqz: "bnez", bnez: "beqz", bgtz: "blez", blez: "bgtz", bltz: "bgez", bgez: "bltz",
 };
 
-const COMPARATORS: Readonly<Record<string, (a: number, b: number) => boolean>> = {
-  "==": (a, b) => a === b, "!=": (a, b) => a !== b,
-  ">": (a, b) => a > b, "<": (a, b) => a < b,
-  ">=": (a, b) => a >= b, "<=": (a, b) => a <= b,
+const COMPARATORS: Readonly<Record<ComparisonOpcode, (a: number, b: number) => boolean>> = {
+  eq: (a, b) => a === b, ne: (a, b) => a !== b,
+  gt: (a, b) => a > b, lt: (a, b) => a < b,
+  ge: (a, b) => a >= b, le: (a, b) => a <= b,
 };
 
 /** Instructions that read a batch value and return it through their first operand. */
@@ -78,18 +67,8 @@ export const OPCODE_ALIASES: Readonly<Record<string, string>> = {
   setSlot: "ss",
 };
 
-/** Whether `op` is one of the binary arithmetic operators (+ - * / %). */
-export function isArithmetic(op: string): boolean {
-  return op in ALU_OPCODES;
-}
-
-/** Whether `op` is one of the comparison operators. */
-export function isComparison(op: string): boolean {
-  return op in COMPARATORS;
-}
-
 /** Evaluate a comparison operator the way the IC10 chip does. */
-export function compare(op: string, a: number, b: number): boolean {
+export function compare(op: ComparisonOpcode, a: number, b: number): boolean {
   return COMPARATORS[op](a, b);
 }
 
@@ -98,17 +77,13 @@ export function ic10Mod(n: number, m: number): number {
   return ((n % m) + m) % m;
 }
 
-/**
- * Evaluate a binary arithmetic operator with IC10 semantics.
- * Callers must check isArithmetic(op) first.
- */
-export function applyArithmetic(op: string, x: number, y: number): number {
+/** Evaluate a binary arithmetic operator with IC10 semantics. */
+export function applyArithmetic(op: ArithmeticOpcode, x: number, y: number): number {
   switch (op) {
-    case "+": return x + y;
-    case "-": return x - y;
-    case "*": return x * y;
-    case "/": return x / y;
-    case "%": return ic10Mod(x, y);
-    default: throw new Error(`Not an arithmetic operator: ${op}`);
+    case "add": return x + y;
+    case "sub": return x - y;
+    case "mul": return x * y;
+    case "div": return x / y;
+    case "mod": return ic10Mod(x, y);
   }
 }

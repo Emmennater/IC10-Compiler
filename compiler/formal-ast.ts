@@ -21,14 +21,17 @@ import {
   EXPRESSION_TYPES,
   STATEMENT_TYPES,
   kids,
+  type SourceRange,
   type SyntaxNode,
 } from "./syntax.ts";
 
 // Types
-export type Range = {
-  to: number;
-  from: number;
-};
+/**
+ * The source span every node carries. Shared with the raw parse tree, so a
+ * formal node can be handed to anything that only wants a position: the
+ * error reporter, and the `node` field of an IR instruction.
+ */
+export type Range = SourceRange;
 
 export type FormalSyntaxNode =
   | Block
@@ -265,12 +268,14 @@ export type UnaryOp = Range & {
   opcode: "neg" | "pos" | "not";
 };
 
+export type ComparisonOpcode = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
+
 // <expression> <op> <expression>
 export type ComparisonOp = Range & {
   type: "comparisonop";
   left: Expression;
   right: Expression;
-  opcode: "eq" | "ne" | "lt" | "le" | "gt" | "ge";
+  opcode: ComparisonOpcode;
 };
 
 // <expression> <op> <expression>
@@ -302,7 +307,7 @@ const ARITHMETIC_OPS: Record<string, ArithmeticOpcode | undefined> = {
   "+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod",
 };
 
-const COMPARISON_OPS: Record<string, ComparisonOp["opcode"] | undefined> = {
+const COMPARISON_OPS: Record<string, ComparisonOpcode | undefined> = {
   "==": "eq", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge",
 };
 
@@ -692,4 +697,52 @@ export function convertStatement(node: SyntaxNode): Statement {
 export function getFormalAST(root: SyntaxNode): Block {
   checkSyntax(root);
   return convertBlock(root, null, null);
+}
+
+/**
+ * Every child of a node, for the analyses that care about what appears
+ * *somewhere* in a subtree — which names it reads, which it assigns — rather
+ * than about the shape those names appear in. The formal analogue of `kids`.
+ *
+ * The name of a function (in a call or a definition) is deliberately not a
+ * child: it names a function, not a value, and a walk looking for name
+ * references must not mistake one for the other. Consumers that want the
+ * callee read `name` directly.
+ */
+export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
+  switch (node.type) {
+    case "block": return node.statements;
+    case "declaration": return node.value ? [node.target, node.value] : [node.target];
+    case "assignment": return [node.target, node.value];
+    case "compoundassignop": return [node.target, node.right];
+    case "if": return node.else ? [...node.ifs, node.else] : [...node.ifs];
+    case "ifthen": return [node.condition, node.then];
+    case "loop": return [node.body];
+    case "while": return [node.condition, node.body];
+    case "repeat": return [node.body, node.until];
+    case "break":
+    case "continue":
+    case "yield":
+    case "preprocessordir":
+    case "identifier":
+    case "constant":
+    case "bool":
+    case "string":
+    case "device":
+      return [];
+    case "sleep": return [node.duration];
+    case "return": return [node.value];
+    case "define": return [node.name, node.value];
+    case "devicedef": return [node.name, node.device];
+    case "functiondef": return [...node.args, node.body];
+    case "functioncall": return node.params;
+    case "deviceprop": return [node.device, node.prop];
+    case "devicechannelprop": return [node.device, node.channel, node.prop];
+    case "devicenameprop": return [node.device, node.name, node.prop];
+    case "binaryop":
+    case "comparisonop":
+    case "logicalop":
+      return [node.left, node.right];
+    case "unaryop": return [node.value];
+  }
 }

@@ -3,16 +3,16 @@
  * (referenced/assigned name sets) that call sites and variable demotion use.
  */
 
-import { kids, type SyntaxNode } from "./syntax.ts";
+import { childrenOf, type FormalSyntaxNode, type FunctionDef, type Statement } from "./formal-ast.ts";
 import type { Inst } from "./ir.ts";
 
 /** A user-defined function, registered before anything is lowered. */
 export type FnInfo = {
   name: string;
   params: string[];
-  body: SyntaxNode[];
+  body: Statement[];
   constexpr: boolean;
-  node: SyntaxNode;
+  node: FunctionDef;
   callCount: number;
   // Filled in when the function is lowered for jal-style calls
   paramVregs: number[] | null;
@@ -25,6 +25,12 @@ export type FnInfo = {
 
 export type FnTable = Map<string, FnInfo>;
 
+/** The name a plain `x = ...` / `x += ...` assigns, or null for a device write. */
+function assignedName(node: FormalSyntaxNode): string | null {
+  if (node.type !== "assignment" && node.type !== "compoundassignop") return null;
+  return node.target.type === "identifier" ? node.target.name : null;
+}
+
 /**
  * Names the function's body (and its callees') reads and assigns —
  * syntactic and over-approximate; call sites filter them against the
@@ -35,20 +41,18 @@ export function fnVarRefs(fn: FnInfo, fnTable: FnTable): { refs: Set<string>; wr
   const refs = new Set<string>();
   const writes = new Set<string>();
   const seen = new Set<string>([fn.name]);
-  const walk = (node: SyntaxNode): void => {
-    if (node.type === "VariableName") refs.add(node.text);
-    if (node.type === "Assignment") {
-      const target = kids(node)[0];
-      if (target?.type === "VariableName") writes.add(target.text);
-    }
-    if (node.type === "FunctionCall") {
-      const callee = fnTable.get(kids(node)[0]?.text ?? "");
+  const walk = (node: FormalSyntaxNode): void => {
+    if (node.type === "identifier") refs.add(node.name);
+    const written = assignedName(node);
+    if (written !== null) writes.add(written);
+    if (node.type === "functioncall") {
+      const callee = fnTable.get(node.name.name);
       if (callee && !seen.has(callee.name)) {
         seen.add(callee.name);
         for (const statement of callee.body) walk(statement);
       }
     }
-    for (const child of node.children) walk(child);
+    for (const child of childrenOf(node)) walk(child);
   };
   for (const statement of fn.body) walk(statement);
   fn.varRefs = refs;
@@ -61,30 +65,28 @@ export function fnVarRefs(fn: FnInfo, fnTable: FnTable): { refs: Set<string>; wr
  * constructs and — since calls can write globals — the (transitive)
  * write sets of every function called in it.
  */
-export function collectAssignedNames(block: SyntaxNode[], fnTable: FnTable, out: Set<string>): void {
-  const walk = (node: SyntaxNode): void => {
-    if (node.type === "Assignment") {
-      // Only plain variable targets; device writes need no merge handling
-      const target = kids(node)[0];
-      if (target?.type === "VariableName") out.add(target.text);
-    }
-    if (node.type === "FunctionCall") {
-      const callee = fnTable.get(kids(node)[0]?.text ?? "");
+export function collectAssignedNames(block: Statement[], fnTable: FnTable, out: Set<string>): void {
+  const walk = (node: FormalSyntaxNode): void => {
+    // Only plain variable targets; device writes need no merge handling
+    const written = assignedName(node);
+    if (written !== null) out.add(written);
+    if (node.type === "functioncall") {
+      const callee = fnTable.get(node.name.name);
       if (callee) for (const name of fnVarRefs(callee, fnTable).writes) out.add(name);
     }
-    if (node.type === "FunctionDef") return; // nested defs error elsewhere
-    for (const child of node.children) walk(child);
+    if (node.type === "functiondef") return; // nested defs error elsewhere
+    for (const child of childrenOf(node)) walk(child);
   };
   for (const statement of block) walk(statement);
 }
 
 /** Number of `return` statements anywhere inside the block. */
-export function countReturns(block: SyntaxNode[]): number {
+export function countReturns(block: Statement[]): number {
   let count = 0;
-  const walk = (node: SyntaxNode): void => {
-    if (node.type === "Return") count++;
+  const walk = (node: FormalSyntaxNode): void => {
+    if (node.type === "return") count++;
     // Nested function definitions are rejected elsewhere
-    for (const child of node.children) walk(child);
+    for (const child of childrenOf(node)) walk(child);
   };
   for (const statement of block) walk(statement);
   return count;

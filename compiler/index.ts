@@ -23,6 +23,7 @@
  */
 
 import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
+import { getFormalAST } from "./formal-ast.ts";
 import { IdAllocator } from "./ir.ts";
 import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables.ts";
 import { Lowerer } from "./lowering.ts";
@@ -75,10 +76,13 @@ export function compile(ast: SyntaxNode, config: Partial<Config> = {}): string {
   validateConfig(registerOrder);
 
   const errors = new ErrorReporter(ast.text);
+  // Reported here rather than left to getFormalAST so the message carries a
+  // source line, as every other diagnostic does.
   checkSyntax(ast, errors);
 
   const ids = new IdAllocator();
-  const { program, ifRegions, loopRegions } = new Lowerer(ast, errors, ids).lower();
+  const { program, ifRegions, loopRegions } =
+    new Lowerer(getFormalAST(ast), errors, ids).lower();
   const optimized = optimize(program, ifRegions, loopRegions);
   const { program: allocated, registerOf } =
     allocateRegisters(optimized, { registerOrder, ids, errors, rootNode: ast });

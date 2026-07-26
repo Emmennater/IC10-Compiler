@@ -23,20 +23,24 @@
  * frame was never modified — the JavaScript call stack is the only stack.
  */
 
+import type { ErrorReporter } from "./syntax.ts";
 import {
-  kids, blockOf, conditionOf,
-  EXPRESSION_TYPES, STATEMENT_TYPES,
-  type ErrorReporter, type SyntaxNode,
-} from "./syntax.ts";
+  childrenOf,
+  type Assignment, type BinaryOp, type Block, type ComparisonOp, type ComparisonOpcode,
+  type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
+  type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
+  type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
+  type StringExpr, type UnaryOp, type While,
+} from "./formal-ast.ts";
 import {
+  assertNever,
   constBoolOp, constOp, constTextOp, destOf, idRange, isConstText, isZero, setDest, symOp,
   type ConstOperand, type IdAllocator, type IfRegion, type Inst, type LoopRegion,
   type Operand, type UnnumberedInst,
 } from "./ir.ts";
 import {
-  AGGREGATORS, ALU_OPCODES, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OP_TYPES,
-  OPCODE_ALIASES, SET_OPCODES,
-  applyArithmetic, compare, isComparison,
+  AGGREGATORS, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OPCODE_ALIASES, SET_OPCODES,
+  applyArithmetic, compare,
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
 import { collectAssignedNames, countReturns, fnVarRefs, type FnInfo, type FnTable } from "./functions.ts";
@@ -82,7 +86,7 @@ type Services = {
   readonly ids: IdAllocator;
   readonly labels: LabelFactory;
   readonly fnTable: FnTable;
-  readonly registeredFnNodes: Set<SyntaxNode>;
+  readonly registeredFnNodes: Set<FunctionDef>;
   // Globals referenced by any jal-called function get a permanent home
   // register the moment they are declared, so initialization stays where
   // the source put it and every later write goes through the home.
@@ -115,10 +119,10 @@ function including(set: ReadonlySet<string>, name: string): ReadonlySet<string> 
 
 export class Lowerer {
   private readonly services: Services;
-  private readonly ast: SyntaxNode;
+  private readonly ast: Block;
 
   constructor(
-    ast: SyntaxNode,
+    ast: Block,
     errors: ErrorReporter,
     ids: IdAllocator,
   ) {
@@ -152,7 +156,7 @@ export class Lowerer {
       loop: null,
       active: new Set(),
     });
-    for (const statement of this.ast.children) {
+    for (const statement of this.ast.statements) {
       root.processStatement(statement);
     }
 
@@ -167,29 +171,28 @@ export class Lowerer {
   private registerFunctions(): void {
     const { errors, fnTable, registeredFnNodes } = this.services;
     let pendingConstexpr = false;
-    for (const statement of kids(this.ast)) {
-      if (statement.type === "PreprocessorDirective") {
-        const directive = kids(statement).find(c => c.type === "DirectiveName");
-        if (directive?.text !== "constexpr") {
-          throw errors.error(`Unknown directive @${directive?.text ?? ""}`, statement);
+    for (const statement of this.ast.statements) {
+      if (statement.type === "preprocessordir") {
+        if (statement.name !== "constexpr") {
+          throw errors.error(`Unknown directive @${statement.name}`, statement);
         }
         pendingConstexpr = true;
         continue;
       }
-      if (statement.type === "FunctionDef") {
-        const parts = kids(statement);
-        const nameNode = parts.find(c => c.type === "FunctionName");
-        const block = parts.find(c => c.type === "FunctionBlock");
-        if (!nameNode || !block) throw errors.error("Malformed function definition", statement);
-        if (fnTable.has(nameNode.text)) {
-          throw errors.error(`${nameNode.text} was already defined`, nameNode);
+      if (statement.type === "functiondef") {
+        const name = statement.name.name;
+        // The grammar produces no block node at all for an empty body, so
+        // "no statements" is exactly the case the original rejected here.
+        if (statement.body.statements.length === 0) {
+          throw errors.error("Malformed function definition", statement);
         }
-        const blockIdx = parts.indexOf(block);
-        const params = parts.slice(0, blockIdx).filter(c => c.type === "VariableName").map(c => c.text);
-        fnTable.set(nameNode.text, {
-          name: nameNode.text,
-          params,
-          body: kids(block).filter(c => STATEMENT_TYPES.has(c.type)),
+        if (fnTable.has(name)) {
+          throw errors.error(`${name} was already defined`, statement.name);
+        }
+        fnTable.set(name, {
+          name,
+          params: statement.args.map(arg => arg.name),
+          body: statement.body.statements,
           constexpr: pendingConstexpr,
           node: statement,
           callCount: 0,
@@ -205,13 +208,12 @@ export class Lowerer {
     }
 
     // Count call sites for the inline-single-use decision
-    const countIn = (node: SyntaxNode): void => {
-      if (node.type === "FunctionCall") {
-        const name = kids(node).find(c => c.type === "FunctionName")?.text;
-        const fn = name ? fnTable.get(name) : undefined;
+    const countIn = (node: FormalSyntaxNode): void => {
+      if (node.type === "functioncall") {
+        const fn = fnTable.get(node.name.name);
         if (fn) fn.callCount++;
       }
-      for (const child of node.children) countIn(child);
+      for (const child of childrenOf(node)) countIn(child);
     };
     countIn(this.ast);
   }
@@ -308,7 +310,7 @@ class FrameLowerer {
    * against this frame's chain. The folding itself lives in `folding.ts`;
    * this supplies the only thing it cannot know on its own.
    */
-  private fold(node: SyntaxNode): ConstOperand | null {
+  private fold(node: Expression): ConstOperand | null {
     return foldExpression(node, name => {
       const state = this.chain.lookupVar(name);
       if (state && !state.maybe && state.value?.kind === "const") return state.value;
@@ -317,7 +319,7 @@ class FrameLowerer {
   }
 
   /** Register pressure of a subtree, used only to pick evaluation order. */
-  private pressureOf(node: SyntaxNode): number {
+  private pressureOf(node: Expression): number {
     return pressure(node, name => this.chain.lookup(name) !== null);
   }
 
@@ -329,7 +331,7 @@ class FrameLowerer {
   }
 
   /** Coerce an operand to an exact 0/1 value (IC10 and/or are bitwise). */
-  private toBool(operand: Operand, node: SyntaxNode): Operand {
+  private toBool(operand: Operand, node: Range): Operand {
     if (this.isBoolOperand(operand)) return operand;
     if (operand.kind === "const") {
       return constBoolOp(parseFloat(operand.text) !== 0);
@@ -341,7 +343,7 @@ class FrameLowerer {
   }
 
   /** Emit a comparison as a 0/1 value, using the zero-compare forms when possible. */
-  private emitComparison(op: string, a: Operand, b: Operand, node: SyntaxNode): Operand {
+  private emitComparison(op: ComparisonOpcode, a: Operand, b: Operand, node: Range): Operand {
     if (a.kind === "const" && b.kind === "const") {
       return constBoolOp(compare(op, parseFloat(a.text), parseFloat(b.text)));
     }
@@ -360,25 +362,15 @@ class FrameLowerer {
 
   // ------------------------ property accesses ---------------------------
 
-  /** Pieces of a Device*Property node: base, property name, bracket index. */
-  private propertyParts(node: SyntaxNode) {
-    const parts = kids(node);
-    return {
-      base: parts[0],
-      prop: parts[parts.length - 1],
-      index: node.type === "DeviceProperty" ? null : parts[2],
-    };
-  }
-
-  private resolveBase(base: SyntaxNode): ResolvedBase {
-    if (base.type === "Device") return { kind: "device", text: base.text };
-    const symbol = this.chain.lookup(base.text);
-    if (symbol?.kind === "device") return { kind: "device", text: base.text };
+  private resolveBase(base: Device | Identifier): ResolvedBase {
+    if (base.type === "device") return { kind: "device", text: base.name };
+    const symbol = this.chain.lookup(base.name);
+    if (symbol?.kind === "device") return { kind: "device", text: base.name };
     if (symbol?.kind === "define") return { kind: "define", text: symbol.text };
     if (symbol?.kind === "var") {
-      throw this.errors.error(`${base.text} is a variable, not a device or define`, base);
+      throw this.errors.error(`${base.name} is a variable, not a device or define`, base);
     }
-    return { kind: "unknown", name: base.text };
+    return { kind: "unknown", name: base.name };
   }
 
   /**
@@ -386,27 +378,27 @@ class FrameLowerer {
    * devices, defines — they are instruction operands, not values to load);
    * strings name IC10 symbols directly; everything else compiles normally.
    */
-  private compileCallArg(node: SyntaxNode): Operand {
-    if (node.type === "Device") return symOp(node.text);
-    if (node.type === "String") return symOp(node.text.slice(1, -1));
-    if (node.type === "VariableName") {
-      const symbol = this.chain.lookup(node.text);
-      if (!symbol) return symOp(node.text);
-      if (symbol.kind === "device") return symOp(node.text);
+  private compileCallArg(node: Expression): Operand {
+    if (node.type === "device") return symOp(node.name);
+    if (node.type === "string") return symOp(node.value.slice(1, -1));
+    if (node.type === "identifier") {
+      const symbol = this.chain.lookup(node.name);
+      if (!symbol) return symOp(node.name);
+      if (symbol.kind === "device") return symOp(node.name);
     }
     return this.compileExpression(node);
   }
 
   /** The slot index of a device[...] access. */
-  private slotIndexOperand(index: SyntaxNode): Operand {
-    if (index.type === "Integer") return constTextOp(index.text);
-    if (index.type === "String") throw this.errors.error("Slot indexes must be numbers", index);
+  private slotIndexOperand(index: Constant | Identifier | StringExpr): Operand {
+    if (index.type === "constant") return constTextOp(String(index.value));
+    if (index.type === "string") throw this.errors.error("Slot indexes must be numbers", index);
     return this.compileCallArg(index);
   }
 
   /** The name filter of a deviceGroup[...] access, hashed when a string. */
-  private nameHashOperand(index: SyntaxNode): Operand {
-    if (index.type === "String") return symOp(`HASH(${index.text})`);
+  private nameHashOperand(index: Identifier | StringExpr): Operand {
+    if (index.type === "string") return symOp(`HASH(${index.value})`);
     return this.compileCallArg(index);
   }
 
@@ -418,10 +410,9 @@ class FrameLowerer {
    * first operand. Aggregators (Sum/Average/...) become batch reads.
    * User-defined functions take precedence over raw opcodes.
    */
-  private compileCall(node: SyntaxNode, wantValue: boolean): Operand | null {
-    const parts = kids(node);
-    const name = parts[0].text;
-    const argNodes = parts.filter(c => EXPRESSION_TYPES.has(c.type));
+  private compileCall(node: FunctionCall, wantValue: boolean): Operand | null {
+    const name = node.name.name;
+    const argNodes = node.params;
 
     const fn = this.fnTable.get(name);
     if (fn) return this.compileUserCall(fn, argNodes, node, wantValue);
@@ -443,8 +434,8 @@ class FrameLowerer {
 
   private compileUserCall(
     fn: FnInfo,
-    argNodes: SyntaxNode[],
-    node: SyntaxNode,
+    argNodes: Expression[],
+    node: Range,
     wantValue: boolean,
   ): Operand | null {
     if (argNodes.length !== fn.params.length) {
@@ -488,28 +479,27 @@ class FrameLowerer {
 
   private compileAggregator(
     name: string,
-    argNodes: SyntaxNode[],
-    node: SyntaxNode,
+    argNodes: Expression[],
+    node: Range,
     wantValue: boolean,
   ): Operand {
     if (!wantValue) throw this.errors.error(`${name}(...) must be assigned to something`, node);
     const arg = argNodes.length === 1 ? argNodes[0] : null;
-    if (!arg || (arg.type !== "DeviceProperty" && arg.type !== "DeviceNameProperty")) {
+    if (!arg || (arg.type !== "deviceprop" && arg.type !== "devicenameprop")) {
       throw this.errors.error(`${name} expects one deviceHash.LogicType argument`, arg ?? node);
     }
-    const { base, prop, index } = this.propertyParts(arg);
-    const resolved = this.resolveBase(base);
+    const resolved = this.resolveBase(arg.device);
     if (resolved.kind === "device") {
-      throw this.errors.error(`${name} works on device groups, not single devices`, base);
+      throw this.errors.error(`${name} works on device groups, not single devices`, arg.device);
     }
     const hash = resolved.kind === "define" ? symOp(resolved.text) : symOp(`HASH("${resolved.name}")`);
     const dest = this.ids.newVreg();
-    if (arg.type === "DeviceProperty") {
-      this.emit({ op: "call", opcode: "lb", dest, args: [hash, symOp(prop.text), symOp(name)], node });
+    if (arg.type === "deviceprop") {
+      this.emit({ op: "call", opcode: "lb", dest, args: [hash, symOp(arg.prop.name), symOp(name)], node });
     } else {
       this.emit({
         op: "call", opcode: "lbn", dest,
-        args: [hash, this.nameHashOperand(index!), symOp(prop.text), symOp(name)],
+        args: [hash, this.nameHashOperand(arg.name), symOp(arg.prop.name), symOp(name)],
         node,
       });
     }
@@ -518,23 +508,25 @@ class FrameLowerer {
 
   // ---------------------------- expressions -----------------------------
 
-  private compileExpression(node: SyntaxNode): Operand {
+  private compileExpression(node: Expression): Operand {
     switch (node.type) {
-      case "Number":
-        return constOp(parseFloat(node.text)) ?? constTextOp(node.text);
-      case "Bool":
-        return constBoolOp(node.text === "true");
-      case "String":
+      case "constant":
+        return constOp(node.value) ?? constTextOp(String(node.value));
+      case "bool":
+        return constBoolOp(node.value);
+      case "string":
         // Strings are hashed; HASH("...") is resolved by the game
-        return symOp(`HASH(${node.text})`);
-      case "Device":
-        throw this.errors.error(`${node.text} is a device, not a value`, node);
-      case "DeviceProperty": {
-        const { base, prop } = this.propertyParts(node);
-        const resolved = this.resolveBase(base);
+        return symOp(`HASH(${node.value})`);
+      case "device":
+        throw this.errors.error(`${node.name} is a device, not a value`, node);
+      case "deviceprop": {
+        const resolved = this.resolveBase(node.device);
         if (resolved.kind === "device") {
           const dest = this.ids.newVreg();
-          this.emit({ op: "call", opcode: "l", dest, args: [symOp(resolved.text), symOp(prop.text)], node });
+          this.emit({
+            op: "call", opcode: "l", dest,
+            args: [symOp(resolved.text), symOp(node.prop.name)], node,
+          });
           return { kind: "vreg", id: dest };
         }
         if (resolved.kind === "define") {
@@ -542,44 +534,41 @@ class FrameLowerer {
             "Reading from a device group needs an aggregator (Sum, Average, Minimum, Maximum)", node);
         }
         // Unknown identifiers: a game constant like DisplayMode.Seconds
-        return symOp(`${resolved.name}.${prop.text}`);
+        return symOp(`${resolved.name}.${node.prop.name}`);
       }
-      case "DeviceChannelProperty":
-      case "DeviceNameProperty": {
-        const { base, prop, index } = this.propertyParts(node);
-        const resolved = this.resolveBase(base);
+      case "devicechannelprop":
+      case "devicenameprop": {
+        const resolved = this.resolveBase(node.device);
         if (resolved.kind !== "device") {
           throw this.errors.error(
             "Reading from a device group needs an aggregator (Sum, Average, Minimum, Maximum)", node);
         }
+        const index = node.type === "devicechannelprop" ? node.channel : node.name;
         const dest = this.ids.newVreg();
         this.emit({
           op: "call", opcode: "ls", dest,
-          args: [symOp(resolved.text), this.slotIndexOperand(index!), symOp(prop.text)],
+          args: [symOp(resolved.text), this.slotIndexOperand(index), symOp(node.prop.name)],
           node,
         });
         return { kind: "vreg", id: dest };
       }
-      case "FunctionCall":
+      case "functioncall":
         return this.compileCall(node, true)!;
-      case "VariableName":
+      case "identifier":
         return this.compileVariableRead(node);
-      case "Parens": {
-        const inner = kids(node).find(c => EXPRESSION_TYPES.has(c.type));
-        if (!inner) throw this.errors.error("Empty parentheses", node);
-        return this.compileExpression(inner);
-      }
-      case "UnaryOp":
+      case "unaryop":
         return this.compileUnaryOp(node);
-      case "BinaryOp":
+      case "binaryop":
+      case "comparisonop":
+      case "logicalop":
         return this.compileBinaryOp(node);
       default:
-        throw this.errors.error(`Unexpected expression: ${node.type}`, node);
+        return assertNever(node, "expression");
     }
   }
 
-  private compileVariableRead(node: SyntaxNode): Operand {
-    const name = node.text;
+  private compileVariableRead(node: Identifier): Operand {
+    const name = node.name;
     const symbol = this.chain.lookup(name);
     if (symbol?.kind === "var") {
       const state = symbol.state;
@@ -606,11 +595,10 @@ class FrameLowerer {
     return { kind: "vreg", id: dest };
   }
 
-  private compileUnaryOp(node: SyntaxNode): Operand {
-    const [op, operandNode] = kids(node);
-    if (op.text === "+") return this.compileExpression(operandNode);
-    const a = this.compileExpression(operandNode);
-    if (op.text === "!") {
+  private compileUnaryOp(node: UnaryOp): Operand {
+    if (node.opcode === "pos") return this.compileExpression(node.value);
+    const a = this.compileExpression(node.value);
+    if (node.opcode === "not") {
       // Logical NOT: seqz gives an exact 0/1 for any input
       if (a.kind === "const") {
         return constBoolOp(parseFloat(a.text) === 0);
@@ -629,39 +617,37 @@ class FrameLowerer {
     return { kind: "vreg", id: dest };
   }
 
-  private compileBinaryOp(node: SyntaxNode): Operand {
-    const [leftNode, opNode, rightNode] = kids(node);
-    const op = opNode.text;
-
+  private compileBinaryOp(node: BinaryOp | ComparisonOp | LogicalOp): Operand {
     // Evaluate the register-hungrier side first to minimize live values
     let a: Operand;
     let b: Operand;
-    if (this.pressureOf(rightNode) > this.pressureOf(leftNode)) {
-      b = this.compileExpression(rightNode);
-      a = this.compileExpression(leftNode);
+    if (this.pressureOf(node.right) > this.pressureOf(node.left)) {
+      b = this.compileExpression(node.right);
+      a = this.compileExpression(node.left);
     } else {
-      a = this.compileExpression(leftNode);
-      b = this.compileExpression(rightNode);
+      a = this.compileExpression(node.left);
+      b = this.compileExpression(node.right);
     }
 
-    if (isComparison(op)) return this.emitComparison(op, a, b, node);
+    if (node.type === "comparisonop") return this.emitComparison(node.opcode, a, b, node);
 
-    if (op === "&&" || op === "||") {
+    if (node.type === "logicalop") {
       // As data, outside a condition. Dropped operands were pure; any
       // loads they emitted are cleaned up by dead code elimination.
+      const isAnd = node.opcode === "and";
       if (a.kind === "const") {
         const truthy = parseFloat(a.text) !== 0;
-        if (op === "&&") return truthy ? this.toBool(b, node) : constBoolOp(false);
+        if (isAnd) return truthy ? this.toBool(b, node) : constBoolOp(false);
         return truthy ? constBoolOp(true) : this.toBool(b, node);
       }
       if (b.kind === "const") {
         const truthy = parseFloat(b.text) !== 0;
-        if (op === "&&") return truthy ? this.toBool(a, node) : constBoolOp(false);
+        if (isAnd) return truthy ? this.toBool(a, node) : constBoolOp(false);
         return truthy ? constBoolOp(true) : this.toBool(a, node);
       }
       const dest = this.ids.newVreg();
       this.emit({
-        op: "alu", opcode: op === "&&" ? "and" : "or", dest,
+        op: "alu", opcode: node.opcode, dest,
         args: [this.toBool(a, node), this.toBool(b, node)], node,
       });
       this.boolVregs.add(dest);
@@ -671,18 +657,18 @@ class FrameLowerer {
     // Arithmetic: constant folding first
     // (constants propagated through variables included)
     if (a.kind === "const" && b.kind === "const") {
-      const folded = constOp(applyArithmetic(op, parseFloat(a.text), parseFloat(b.text)));
+      const folded = constOp(applyArithmetic(node.opcode, parseFloat(a.text), parseFloat(b.text)));
       if (folded) return folded;
     }
 
     // Algebraic identities that make the whole operation free
-    if (op === "+" && isConstText(a, "0")) return b;
-    if ((op === "+" || op === "-") && isConstText(b, "0")) return a;
-    if (op === "*" && isConstText(a, "1")) return b;
-    if ((op === "*" || op === "/") && isConstText(b, "1")) return a;
+    if (node.opcode === "add" && isConstText(a, "0")) return b;
+    if ((node.opcode === "add" || node.opcode === "sub") && isConstText(b, "0")) return a;
+    if (node.opcode === "mul" && isConstText(a, "1")) return b;
+    if ((node.opcode === "mul" || node.opcode === "div") && isConstText(b, "1")) return a;
 
     const dest = this.ids.newVreg();
-    this.emit({ op: "alu", opcode: ALU_OPCODES[op], dest, args: [a, b], node });
+    this.emit({ op: "alu", opcode: node.opcode, dest, args: [a, b], node });
     return { kind: "vreg", id: dest };
   }
 
@@ -695,65 +681,52 @@ class FrameLowerer {
    * short-circuit (so a placeholder load on the right is skipped when the
    * left side already decided).
    */
-  private compileCondition(node: SyntaxNode, target: string, jumpWhen: boolean): void {
-    switch (node.type) {
-      case "Parens": {
-        const inner = kids(node).find(c => EXPRESSION_TYPES.has(c.type));
-        if (!inner) throw this.errors.error("Empty parentheses", node);
-        this.compileCondition(inner, target, jumpWhen);
+  private compileCondition(node: Expression, target: string, jumpWhen: boolean): void {
+    // Logical NOT in a condition is free: flip the branch polarity.
+    // (Arithmetic negation falls through to truthiness.)
+    if (node.type === "unaryop" && node.opcode === "not") {
+      this.compileCondition(node.value, target, !jumpWhen);
+      return;
+    }
+
+    if (node.type === "comparisonop") {
+      let a = this.compileExpression(node.left);
+      let b = this.compileExpression(node.right);
+      let cmp = node.opcode;
+      if (a.kind === "const" && b.kind === "const") {
+        const outcome = compare(cmp, parseFloat(a.text), parseFloat(b.text));
+        if (outcome === jumpWhen) this.emit({ op: "jump", target, node });
         return;
       }
-      case "UnaryOp": {
-        // Logical NOT in a condition is free: flip the branch polarity
-        const [op, operandNode] = kids(node);
-        if (op.text === "!") {
-          this.compileCondition(operandNode, target, !jumpWhen);
-          return;
-        }
-        break; // arithmetic negation: fall through to truthiness
+      if (isZero(a)) {
+        [cmp, a, b] = [MIRROR[cmp], b, a];
       }
-      case "BinaryOp": {
-        const [leftNode, opNode, rightNode] = kids(node);
-        const op = opNode.text;
-        if (isComparison(op)) {
-          let a = this.compileExpression(leftNode);
-          let b = this.compileExpression(rightNode);
-          let cmp = op;
-          if (a.kind === "const" && b.kind === "const") {
-            const outcome = compare(cmp, parseFloat(a.text), parseFloat(b.text));
-            if (outcome === jumpWhen) this.emit({ op: "jump", target, node });
-            return;
-          }
-          if (isZero(a)) {
-            [cmp, a, b] = [MIRROR[cmp], b, a];
-          }
-          const table = jumpWhen ? BRANCH_TRUE : BRANCH_FALSE;
-          if (isZero(b)) {
-            this.emit({ op: "branch", opcode: `${table[cmp]}z`, args: [a], target, node });
-          } else {
-            this.emit({ op: "branch", opcode: table[cmp], args: [a, b], target, node });
-          }
-          return;
-        }
-        if (op === "&&" || op === "||") {
-          // Short-circuit: chain branches instead of materializing a boolean
-          const bothMustDecide = (op === "&&") === !jumpWhen;
-          if (bothMustDecide) {
-            // (&& jumping on false) or (|| jumping on true): either side decides alone
-            this.compileCondition(leftNode, target, jumpWhen);
-            this.compileCondition(rightNode, target, jumpWhen);
-          } else {
-            // The left side alone can settle the outcome the other way
-            const skip = this.labels.newShortCircuit();
-            this.compileCondition(leftNode, skip, !jumpWhen);
-            this.compileCondition(rightNode, target, jumpWhen);
-            this.emit({ op: "label", name: skip, node });
-          }
-          return;
-        }
-        break; // arithmetic: fall through to truthiness
+      const table = jumpWhen ? BRANCH_TRUE : BRANCH_FALSE;
+      if (isZero(b)) {
+        this.emit({ op: "branch", opcode: `${table[cmp]}z`, args: [a], target, node });
+      } else {
+        this.emit({ op: "branch", opcode: table[cmp], args: [a, b], target, node });
       }
+      return;
     }
+
+    if (node.type === "logicalop") {
+      // Short-circuit: chain branches instead of materializing a boolean
+      const bothMustDecide = (node.opcode === "and") === !jumpWhen;
+      if (bothMustDecide) {
+        // (&& jumping on false) or (|| jumping on true): either side decides alone
+        this.compileCondition(node.left, target, jumpWhen);
+        this.compileCondition(node.right, target, jumpWhen);
+      } else {
+        // The left side alone can settle the outcome the other way
+        const skip = this.labels.newShortCircuit();
+        this.compileCondition(node.left, skip, !jumpWhen);
+        this.compileCondition(node.right, target, jumpWhen);
+        this.emit({ op: "label", name: skip, node });
+      }
+      return;
+    }
+
     // Truthiness of an arbitrary value: compare against zero
     const value = this.compileExpression(node);
     if (value.kind === "const") {
@@ -770,7 +743,7 @@ class FrameLowerer {
    * Put a value into a specific vreg, retargeting the instruction that just
    * produced it instead of adding a move whenever possible.
    */
-  private writeThrough(home: number, value: Operand, node: SyntaxNode): void {
+  private writeThrough(home: number, value: Operand, node: Range): void {
     const last = this.lastEmitted();
     if (
       value.kind === "vreg" &&
@@ -788,7 +761,7 @@ class FrameLowerer {
    * Record an assignment's value. For demoted variables (inside an if/loop
    * that assigns them) the value is also written to the home vreg.
    */
-  private assignVariable(state: VarState, value: Operand, node: SyntaxNode): void {
+  private assignVariable(state: VarState, value: Operand, node: Range): void {
     if (state.home !== null) {
       this.writeThrough(state.home, value, node);
       state.value = value.kind === "const" ? value : { kind: "vreg", id: state.home };
@@ -810,7 +783,7 @@ class FrameLowerer {
    * variable's own vreg when it owns one outright, otherwise materialize
    * the current value into a fresh register before the control flow forks.
    */
-  private demoteVariables(names: Set<string>, node: SyntaxNode): Demoted[] {
+  private demoteVariables(names: Set<string>, node: Range): Demoted[] {
     const demoted: Demoted[] = [];
     for (const name of names) {
       const symbol = this.chain.lookup(name);
@@ -853,20 +826,19 @@ class FrameLowerer {
   // ------------------------------- if -----------------------------------
 
   /** Lower a block's statements in a frame with one fresh scope on top. */
-  private processBlockScoped(statements: SyntaxNode[]): void {
+  private processBlockScoped(statements: Statement[]): void {
     const block = this.withContext({ chain: this.chain.child() });
     for (const statement of statements) block.processStatement(statement);
   }
 
-  private processIf(node: SyntaxNode): void {
-    type Arm = { cond: SyntaxNode | null; block: SyntaxNode[]; node: SyntaxNode };
-    const parsedArms: Arm[] = [];
-    for (const part of kids(node)) {
-      if (part.type === "If" || part.type === "ElseIf" || part.type === "Else") {
-        const cond = part.type === "Else" ? null : conditionOf(part);
-        parsedArms.push({ cond, block: blockOf(part), node: part });
-      }
-    }
+  private processIf(node: If): void {
+    type Arm = { cond: Expression | null; block: Statement[]; node: Range };
+    const parsedArms: Arm[] = node.ifs.map(arm => ({
+      cond: arm.condition,
+      block: arm.then.statements,
+      node: arm,
+    }));
+    if (node.else) parsedArms.push({ cond: null, block: node.else.statements, node: node.else });
 
     // Resolve compile-time constant conditions: a false arm disappears, a
     // true arm becomes the unconditional tail of the chain.
@@ -969,12 +941,12 @@ class FrameLowerer {
 
   /** Shared lowering for all loop kinds once labels and demotion are set up. */
   private lowerLoopBody(
-    body: SyntaxNode[],
+    body: Statement[],
     demoted: Demoted[],
     headLabel: string,
     breakLabel: string,
     continueLabel: string,
-    node: SyntaxNode,
+    node: Range,
   ): { headLabelId: number; bodyFrom: number; bodyTo: number } {
     // Inside the body, a demoted variable's value may come from a previous
     // iteration: forget constants, and treat unassigned entries as maybes.
@@ -989,8 +961,8 @@ class FrameLowerer {
     return { headLabelId, bodyFrom, bodyTo };
   }
 
-  private processLoop(node: SyntaxNode): void {
-    const body = blockOf(node);
+  private processLoop(node: Loop): void {
+    const body = node.body.statements;
     const assigned = new Set<string>();
     collectAssignedNames(body, this.fnTable, assigned);
     const demoted = this.demoteVariables(assigned, node);
@@ -1006,16 +978,15 @@ class FrameLowerer {
     this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
   }
 
-  private processWhile(node: SyntaxNode): void {
-    const cond = conditionOf(node);
-    if (!cond) throw this.errors.error("Malformed while loop", node);
+  private processWhile(node: While): void {
+    const cond = node.condition;
 
     // Entry-state fold: sound only for the "never runs" decision, because
     // it is decided once, before any body assignment can change a variable.
     const entryFolded = this.fold(cond);
     if (entryFolded && parseFloat(entryFolded.text) === 0) return; // never runs
 
-    const body = blockOf(node);
+    const body = node.body.statements;
     const assigned = new Set<string>();
     collectAssignedNames(body, this.fnTable, assigned);
     const demoted = this.demoteVariables(assigned, node);
@@ -1047,11 +1018,10 @@ class FrameLowerer {
     this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
   }
 
-  private processRepeat(node: SyntaxNode): void {
-    const cond = conditionOf(node);
-    if (!cond) throw this.errors.error("Malformed repeat loop", node);
+  private processRepeat(node: Repeat): void {
+    const cond = node.until;
 
-    const body = blockOf(node);
+    const body = node.body.statements;
     const assigned = new Set<string>();
     collectAssignedNames(body, this.fnTable, assigned);
     const demoted = this.demoteVariables(assigned, node);
@@ -1088,14 +1058,14 @@ class FrameLowerer {
   // ---------------------------- functions -------------------------------
 
   /** Reject a call that would re-enter a function already being lowered. */
-  private checkNotRecursive(fn: FnInfo, node: SyntaxNode): void {
+  private checkNotRecursive(fn: FnInfo, node: Range): void {
     if (this.cx.active.has(fn.name)) {
       throw this.errors.error(`Recursive functions are not supported: ${fn.name}`, node);
     }
   }
 
   /** Inline a single-call-site function at its call site (textual inlining). */
-  private inlineCall(fn: FnInfo, argNodes: SyntaxNode[], node: SyntaxNode, wantValue: boolean): Operand | null {
+  private inlineCall(fn: FnInfo, argNodes: Expression[], node: Range, wantValue: boolean): Operand | null {
     this.checkNotRecursive(fn, node);
 
     // Parameters that the body reassigns must become real variables,
@@ -1123,12 +1093,10 @@ class FrameLowerer {
     });
 
     const last = fn.body[fn.body.length - 1];
-    if (last?.type === "Return" && countReturns(fn.body) === 1) {
+    if (last?.type === "return" && countReturns(fn.body) === 1) {
       // Single trailing return: the result is just an operand
       for (const statement of fn.body.slice(0, -1)) inlined.processStatement(statement);
-      const expr = kids(last).find(c => EXPRESSION_TYPES.has(c.type));
-      if (!expr) throw this.errors.error("return needs a value", last);
-      return wantValue ? inlined.compileExpression(expr) : null;
+      return wantValue ? inlined.compileExpression(last.value) : null;
     }
 
     const home = this.ids.newVreg();
@@ -1140,7 +1108,7 @@ class FrameLowerer {
   }
 
   /** Lower a function body into its own buffer for jal-style calls. */
-  private lowerFunction(fn: FnInfo, node: SyntaxNode): void {
+  private lowerFunction(fn: FnInfo, node: Range): void {
     this.checkNotRecursive(fn, node);
 
     const buffer: Inst[] = [];
@@ -1210,43 +1178,34 @@ class FrameLowerer {
 
   // ---------------------------- statements ------------------------------
 
-  processStatement(statement: SyntaxNode): void {
-    const parts = kids(statement);
-
+  processStatement(statement: Statement): void {
     switch (statement.type) {
-      case "Declaration":
-        this.processDeclaration(statement, parts);
+      case "declaration":
+        this.processDeclaration(statement);
         break;
-      case "Assignment":
-        this.processAssignment(statement, parts);
+      case "assignment":
+      case "compoundassignop":
+        this.processAssignment(statement);
         break;
-      case "DeviceDeclaration": {
-        const nameNode = parts.find(c => c.type === "VariableName");
-        const deviceNode = parts.find(c => c.type === "Device");
-        if (!nameNode || !deviceNode) throw this.errors.error("Malformed device declaration", statement);
-        if (this.chain.lookup(nameNode.text) || this.fnTable.has(nameNode.text)) {
-          throw this.errors.error(`${nameNode.text} was already defined`, nameNode);
-        }
-        this.chain.declare(nameNode.text, { kind: "device", pin: deviceNode.text });
-        this.emit({ op: "alias", name: nameNode.text, device: deviceNode.text, node: statement });
+      case "devicedef":
+        this.processDeviceDeclaration(statement);
         break;
-      }
-      case "Definition":
-        this.processDefinition(statement, parts);
+      case "define":
+        this.processDefinition(statement);
         break;
-      case "FunctionCall":
+      case "functioncall":
         this.compileCall(statement, false);
         break;
-      case "IfExpr":
+      case "if":
         this.processIf(statement);
         break;
-      case "LoopExpr":
+      case "loop":
         this.processLoop(statement);
         break;
-      case "WhileExpr":
+      case "while":
         this.processWhile(statement);
         break;
-      case "RepeatUntilExpr":
+      case "repeat":
         this.processRepeat(statement);
         break;
       case "break": {
@@ -1259,149 +1218,139 @@ class FrameLowerer {
         this.emit({ op: "jump", target: this.cx.loop.continueLabel, node: statement });
         break;
       }
-      case "Instruction": {
-        // yield, or sleep with one operand
-        const expression = parts.find(c => EXPRESSION_TYPES.has(c.type));
-        if (statement.text.startsWith("sleep")) {
-          if (!expression) throw this.errors.error("sleep needs a duration", statement);
-          const value = this.compileExpression(expression);
-          this.emit({ op: "call", opcode: "sleep", dest: null, args: [value], node: statement });
-        } else {
-          this.emit({ op: "call", opcode: "yield", dest: null, args: [], node: statement });
-        }
+      case "yield":
+        this.emit({ op: "call", opcode: "yield", dest: null, args: [], node: statement });
+        break;
+      case "sleep": {
+        const value = this.compileExpression(statement.duration);
+        this.emit({ op: "call", opcode: "sleep", dest: null, args: [value], node: statement });
         break;
       }
-      case "FunctionDef": {
+      case "functiondef": {
         if (!this.shared.registeredFnNodes.has(statement)) {
           throw this.errors.error("Functions must be defined at the top level", statement);
         }
         break; // registered up front; lowered lazily when called
       }
-      case "PreprocessorDirective": {
+      case "preprocessordir": {
         if (this.chain.depth > 1) {
           throw this.errors.error("Directives must appear at the top level", statement);
         }
         break; // handled during function registration
       }
-      case "Return": {
+      case "return": {
         const target = this.cx.returnTarget;
         if (!target) throw this.errors.error("return outside of a function", statement);
-        const expression = parts.find(c => EXPRESSION_TYPES.has(c.type));
-        if (!expression) throw this.errors.error("return needs a value", statement);
-        const value = this.compileExpression(expression);
+        const value = this.compileExpression(statement.value);
         this.writeThrough(target.home, value, statement);
         this.emit({ op: "jump", target: target.endLabel, node: statement });
         break;
       }
-      case "Comment":
-        break;
       default:
-        throw this.errors.error(`Unexpected statement: ${statement.type}`, statement);
+        assertNever(statement, "statement");
     }
     this.statements.beginStatement(this.ids.nextVregId);
   }
 
-  private processDeclaration(statement: SyntaxNode, parts: SyntaxNode[]): void {
-    const nameNode = parts.find(c => c.type === "VariableName");
-    if (!nameNode) throw this.errors.error("Malformed declaration", statement);
-    if (this.chain.lookup(nameNode.text) || this.fnTable.has(nameNode.text)) {
-      throw this.errors.error(`${nameNode.text} was already defined`, nameNode);
+  /** Reject a name that is already bound to anything else. */
+  private checkUndeclared(name: Identifier): void {
+    if (this.chain.lookup(name.name) || this.fnTable.has(name.name)) {
+      throw this.errors.error(`${name.name} was already defined`, name);
     }
-    const assignIdx = parts.findIndex(c => c.type === "Assign");
-    const initializer = assignIdx >= 0 ? parts[assignIdx + 1] : undefined;
+  }
+
+  private processDeclaration(statement: Declaration): void {
+    this.checkUndeclared(statement.target);
+    const name = statement.target.name;
     // The initializer is evaluated before the name is bound, so a
     // same-named reference is still an IC10 passthrough.
-    const value = initializer ? this.compileExpression(initializer) : null;
+    const value = statement.value ? this.compileExpression(statement.value) : null;
     const state: VarState = { value, maybe: false, home: null };
     // Globals used inside jal-called functions live in a permanent
     // home register from the start; writes go through it from here on.
-    if (this.chain.depth === 1 && this.shared.fnGlobalNames.has(nameNode.text)) {
+    if (this.chain.depth === 1 && this.shared.fnGlobalNames.has(name)) {
       state.home = this.ids.newVreg();
       if (value) this.emit({ op: "movev", dest: state.home, src: value, node: statement });
     }
-    this.chain.declare(nameNode.text, { kind: "var", state });
+    this.chain.declare(name, { kind: "var", state });
   }
 
-  private processAssignment(statement: SyntaxNode, parts: SyntaxNode[]): void {
-    const target = parts[0];
-    const opNode = parts.find(c => c.type === "Assign" || c.type === "CompoundAssignOp");
-    const opIdx = opNode ? parts.indexOf(opNode) : -1;
-    const expression = opIdx >= 0 ? parts[opIdx + 1] : undefined;
-    if (!target || !opNode || !expression) throw this.errors.error("Malformed assignment", statement);
+  private processDeviceDeclaration(statement: DeviceDef): void {
+    this.checkUndeclared(statement.name);
+    const name = statement.name.name;
+    const pin = statement.device.name;
+    this.chain.declare(name, { kind: "device", pin });
+    this.emit({ op: "alias", name, device: pin, node: statement });
+  }
 
-    // `x += e` reads as `x = x + e`. Synthesizing a BinaryOp node and
-    // handing it to the ordinary expression compiler reuses its folding,
-    // algebraic identities (`+= 0` is free), and register-pressure
-    // evaluation order instead of duplicating that logic here.
-    const compoundOp = opNode.type === "CompoundAssignOp" ? opNode.text[0] : null;
-    const value = compoundOp
-      ? this.compileExpression({
-          type: "BinaryOp",
-          text: statement.text,
+  private processAssignment(statement: Assignment | CompoundAssignOp): void {
+    const target = statement.target;
+
+    // `x += e` reads as `x = x + e`. Handing a synthesized BinaryOp to the
+    // ordinary expression compiler reuses its folding, algebraic identities
+    // (`+= 0` is free), and register-pressure evaluation order instead of
+    // duplicating that logic here.
+    const value = statement.type === "compoundassignop"
+      ? this.compileBinaryOp({
+          type: "binaryop",
           from: statement.from,
           to: statement.to,
-          children: [
-            target,
-            { type: OP_TYPES[compoundOp], text: compoundOp, from: opNode.from, to: opNode.to, children: [] },
-            expression,
-          ],
+          left: target,
+          right: statement.right,
+          opcode: statement.opcode,
         })
-      : this.compileExpression(expression);
+      : this.compileExpression(statement.value);
 
-    if (target.type === "VariableName") {
-      const symbol = this.chain.lookup(target.text);
+    if (target.type === "identifier") {
+      const symbol = this.chain.lookup(target.name);
       if (symbol && symbol.kind !== "var") {
-        throw this.errors.error(`Cannot assign to ${target.text}`, target);
+        throw this.errors.error(`Cannot assign to ${target.name}`, target);
       }
       if (symbol) {
         this.assignVariable(symbol.state, value, statement);
       } else {
         // Placeholder write: must leave the registers through a move
-        this.emit({ op: "storename", name: target.text, src: value, node: statement });
+        this.emit({ op: "storename", name: target.name, src: value, node: statement });
       }
       return;
     }
 
     // Device and device-group writes
-    const { base, prop, index } = this.propertyParts(target);
-    const resolved = this.resolveBase(base);
+    const resolved = this.resolveBase(target.device);
     if (resolved.kind === "unknown") {
-      throw this.errors.error(`Unknown device or define ${resolved.name}`, base);
+      throw this.errors.error(`Unknown device or define ${resolved.name}`, target.device);
     }
-    if (target.type === "DeviceProperty") {
+    const prop = symOp(target.prop.name);
+    if (target.type === "deviceprop") {
       const opcode = resolved.kind === "device" ? "s" : "sb";
       this.emit({
         op: "call", opcode, dest: null,
-        args: [symOp(resolved.text), symOp(prop.text), value],
+        args: [symOp(resolved.text), prop, value],
         node: statement,
       });
     } else if (resolved.kind === "device") {
+      const index = target.type === "devicechannelprop" ? target.channel : target.name;
       this.emit({
         op: "call", opcode: "ss", dest: null,
-        args: [symOp(resolved.text), this.slotIndexOperand(index!), symOp(prop.text), value],
+        args: [symOp(resolved.text), this.slotIndexOperand(index), prop, value],
         node: statement,
       });
     } else {
-      if (target.type === "DeviceChannelProperty") {
+      if (target.type === "devicechannelprop") {
         throw this.errors.error("Device groups are selected by name, not slot", target);
       }
       this.emit({
         op: "call", opcode: "sbn", dest: null,
-        args: [symOp(resolved.text), this.nameHashOperand(index!), symOp(prop.text), value],
+        args: [symOp(resolved.text), this.nameHashOperand(target.name), prop, value],
         node: statement,
       });
     }
   }
 
-  private processDefinition(statement: SyntaxNode, parts: SyntaxNode[]): void {
-    const nameNode = parts.find(c => c.type === "VariableName");
-    const assignIdx = parts.findIndex(c => c.type === "Assign");
-    const valueNode = assignIdx >= 0 ? parts[assignIdx + 1] : undefined;
-    if (!nameNode || !valueNode) throw this.errors.error("Malformed definition", statement);
-    if (this.chain.lookup(nameNode.text) || this.fnTable.has(nameNode.text)) {
-      throw this.errors.error(`${nameNode.text} was already defined`, nameNode);
-    }
-    const name = nameNode.text;
+  private processDefinition(statement: DefineDef): void {
+    this.checkUndeclared(statement.name);
+    const name = statement.name.name;
+    const valueNode = statement.value;
     const folded = this.fold(valueNode);
     if (folded) {
       // Numbers keep their name in the output via an IC10 define line
@@ -1409,31 +1358,35 @@ class FrameLowerer {
       this.emit({ op: "definedef", name, value: folded.text, node: statement });
       return;
     }
-    if (valueNode.type === "String") {
+    if (valueNode.type === "string") {
       this.chain.declare(name, { kind: "define", text: name, needsLine: true });
-      this.emit({ op: "definedef", name, value: `HASH(${valueNode.text})`, node: statement });
+      this.emit({ op: "definedef", name, value: `HASH(${valueNode.value})`, node: statement });
       return;
     }
-    if (valueNode.type === "VariableName") {
-      const referenced = this.chain.lookup(valueNode.text);
+    if (valueNode.type === "identifier") {
+      const referenced = this.chain.lookup(valueNode.name);
       if (referenced?.kind === "define") {
         this.chain.declare(name, { kind: "define", text: referenced.text, needsLine: false });
         return;
       }
       if (!referenced) {
         // Bare identifier: substituted verbatim, no define line
-        this.chain.declare(name, { kind: "define", text: valueNode.text, needsLine: false });
+        this.chain.declare(name, { kind: "define", text: valueNode.name, needsLine: false });
         return;
       }
       throw this.errors.error("define values must be constant", valueNode);
     }
-    if (valueNode.type === "DeviceProperty") {
+    if (valueNode.type === "deviceprop") {
       // Game constants like LogicType.Temperature substitute verbatim
-      const { base, prop } = this.propertyParts(valueNode);
-      if (base.type === "Device" || this.chain.lookup(base.text)) {
+      const base = valueNode.device;
+      if (base.type === "device" || this.chain.lookup(base.name)) {
         throw this.errors.error("define values must be constant", valueNode);
       }
-      this.chain.declare(name, { kind: "define", text: `${base.text}.${prop.text}`, needsLine: false });
+      this.chain.declare(name, {
+        kind: "define",
+        text: `${base.name}.${valueNode.prop.name}`,
+        needsLine: false,
+      });
       return;
     }
     throw this.errors.error("define values must be constant", valueNode);

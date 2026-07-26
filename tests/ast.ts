@@ -31,23 +31,36 @@ export const bin = (left: SyntaxNode, op: string, right: SyntaxNode): SyntaxNode
 export const un = (op: string, operand: SyntaxNode): SyntaxNode =>
   node("UnaryOp", "", node("Op", op), operand);
 
+const parenLeft = (): SyntaxNode => node("ParenLeft", "(");
+const parenRight = (): SyntaxNode => node("ParenRight", ")");
+const bracketLeft = (): SyntaxNode => node("BracketLeft", "[");
+const bracketRight = (): SyntaxNode => node("BracketRight", "]");
+const dot = (): SyntaxNode => node("Dot", ".");
+
+/** `a, b, c` — the separators the grammar puts between list items. */
+const commaSeparated = (items: SyntaxNode[]): SyntaxNode[] =>
+  items.flatMap((item, i) => (i === 0 ? [item] : [node("Comma", ","), item]));
+
 export const parens = (inner: SyntaxNode): SyntaxNode =>
-  node("Parens", "", node("(", "("), inner, node(")", ")"));
+  node("Parens", "", parenLeft(), inner, parenRight());
 
 /** device.Property or unknownName.Property (a game constant). */
 export const prop = (base: SyntaxNode, propName: string): SyntaxNode =>
-  node("DeviceProperty", "", base, node("VariableName", propName));
+  node("DeviceProperty", "", base, dot(), node("VariableName", propName));
 
 /** device[slot].Property */
 export const slotProp = (base: SyntaxNode, index: SyntaxNode, propName: string): SyntaxNode =>
-  node("DeviceChannelProperty", "", base, node("[", "["), index, node("]", "]"), node("VariableName", propName));
+  node("DeviceChannelProperty", "",
+    base, bracketLeft(), index, bracketRight(), dot(), node("VariableName", propName));
 
 /** deviceGroup[nameFilter].Property */
 export const nameProp = (base: SyntaxNode, index: SyntaxNode, propName: string): SyntaxNode =>
-  node("DeviceNameProperty", "", base, node("[", "["), index, node("]", "]"), node("VariableName", propName));
+  node("DeviceNameProperty", "",
+    base, bracketLeft(), index, bracketRight(), dot(), node("VariableName", propName));
 
 export const fnCall = (fname: string, ...args: SyntaxNode[]): SyntaxNode =>
-  node("FunctionCall", "", node("FunctionName", fname), ...args);
+  node("FunctionCall", "",
+    node("FunctionName", fname), parenLeft(), ...commaSeparated(args), parenRight());
 
 // ------------------------------ statements ------------------------------
 
@@ -73,17 +86,19 @@ export const deviceDecl = (alias: string, pin: string): SyntaxNode =>
 export const defineStmt = (n: string, value: SyntaxNode): SyntaxNode =>
   node("Definition", "", node("define", "define"), name(n), node("Assign", "="), value);
 
-export const ifExpr = (...arms: SyntaxNode[]): SyntaxNode => node("IfExpr", "", ...arms);
+export const ifExpr = (...arms: SyntaxNode[]): SyntaxNode =>
+  node("IfExpr", "", ...arms, node("end", "end"));
 export const ifArm = (cond: SyntaxNode, ...body: SyntaxNode[]): SyntaxNode =>
-  node("If", "", cond, node("then", "then"), ...body);
+  node("If", "", node("if", "if"), cond, node("then", "then"), ...body);
 export const elifArm = (cond: SyntaxNode, ...body: SyntaxNode[]): SyntaxNode =>
-  node("ElseIf", "", cond, node("then", "then"), ...body);
-export const elseArm = (...body: SyntaxNode[]): SyntaxNode => node("Else", "", ...body);
+  node("ElseIf", "", node("elif", "elif"), cond, node("then", "then"), ...body);
+export const elseArm = (...body: SyntaxNode[]): SyntaxNode =>
+  node("Else", "", node("else", "else"), ...body);
 
 export const loopExpr = (...body: SyntaxNode[]): SyntaxNode =>
-  node("LoopExpr", "", node("loop", "loop"), ...body);
+  node("LoopExpr", "", node("loop", "loop"), ...body, node("end", "end"));
 export const whileExpr = (cond: SyntaxNode, ...body: SyntaxNode[]): SyntaxNode =>
-  node("WhileExpr", "", cond, node("do", "do"), ...body);
+  node("WhileExpr", "", node("while", "while"), cond, node("do", "do"), ...body, node("end", "end"));
 export const repeatUntil = (body: SyntaxNode[], cond: SyntaxNode): SyntaxNode =>
   node("RepeatUntilExpr", "", node("repeat", "repeat"), ...body, node("until", "until"), cond);
 
@@ -94,15 +109,19 @@ export const sleepStmt = (duration: SyntaxNode): SyntaxNode => node("Instruction
 
 export const fnDef = (fname: string, params: string[], ...body: SyntaxNode[]): SyntaxNode =>
   node("FunctionDef", "",
+    node("fn", "fn"),
     node("FunctionName", fname),
-    ...params.map(name),
-    node("FunctionBlock", "", ...body));
+    parenLeft(),
+    ...commaSeparated(params.map(name)),
+    parenRight(),
+    node("FunctionBlock", "", ...body),
+    node("end", "end"));
 
 export const ret = (value: SyntaxNode): SyntaxNode =>
   node("Return", "", node("return", "return"), value);
 
 export const constexprDirective = (): SyntaxNode =>
-  node("PreprocessorDirective", "@constexpr", node("DirectiveName", "constexpr"));
+  node("PreprocessorDirective", "@constexpr", node("At", "@"), node("DirectiveName", "constexpr"));
 
 export const program = (...statements: SyntaxNode[]): SyntaxNode =>
   node("Program", "", ...statements);
