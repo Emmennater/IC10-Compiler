@@ -117,7 +117,7 @@ describe("device properties", () => {
   test("channel property keeps an integer index", () => {
     const statement = only("x = pump[2].Setting") as Assignment;
     expect(statement.value).toMatchObject({
-      type: "devicechannel",
+      type: "devicechannelprop",
       device: { type: "identifier", name: "pump" },
       channel: { type: "constant", value: 2 },
       prop: { name: "Setting" },
@@ -127,8 +127,8 @@ describe("device properties", () => {
   test("name property with a string selector", () => {
     const statement = only('x = pump["Vent"].Setting') as Assignment;
     expect(statement.value).toMatchObject({
-      type: "devicename",
-      name: { type: "string", value: "Vent" },
+      type: "devicenameprop",
+      name: { type: "string", value: "\"Vent\"" },
       prop: { name: "Setting" },
     });
   });
@@ -136,7 +136,7 @@ describe("device properties", () => {
   test("name property with a variable selector", () => {
     const statement = only("x = pump[label].Setting") as Assignment;
     expect(statement.value).toMatchObject({
-      type: "devicename",
+      type: "devicenameprop",
       name: { type: "identifier", name: "label" },
     });
   });
@@ -180,7 +180,7 @@ describe("expressions", () => {
   test("booleans, strings and floats", () => {
     const block = formal('let a = true\nlet b = "hi\\n"\nlet c = 1.5');
     expect((block.statements[0] as Declaration).value).toMatchObject({ type: "bool", value: true });
-    expect((block.statements[1] as Declaration).value).toMatchObject({ type: "string", value: "hi\n" });
+    expect((block.statements[1] as Declaration).value).toMatchObject({ type: "string", value: "\"hi\\n\"" });
     expect((block.statements[2] as Declaration).value).toMatchObject({ type: "constant", value: 1.5 });
   });
 

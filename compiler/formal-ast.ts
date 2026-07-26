@@ -319,9 +319,9 @@ const DEVICE_PINS: ReadonlySet<string> = new Set<DevicePin>([
 ]);
 
 /** Escape sequences the grammar's String token allows. */
-const STRING_ESCAPES: Record<string, string | undefined> = {
-  n: "\n", r: "\r", t: "\t", "0": "\0",
-};
+// const STRING_ESCAPES: Record<string, string | undefined> = {
+//   n: "\n", r: "\r", t: "\t", "0": "\0",
+// };
 
 function fail(message: string, node: SyntaxNode): never {
   throw new CompileError(message, node);
@@ -337,11 +337,11 @@ function checkSyntax(node: SyntaxNode): void {
   for (const child of node.children) checkSyntax(child);
 }
 
-function decodeString(raw: string): string {
-  // The token always carries its surrounding quotes.
-  const body = raw.slice(1, -1);
-  return body.replace(/\\(.)/g, (_match, char: string) => STRING_ESCAPES[char] ?? char);
-}
+// function decodeString(raw: string): string {
+//   // The token always carries its surrounding quotes.
+//   const body = raw.slice(1, -1);
+//   return body.replace(/\\(.)/g, (_match, char: string) => STRING_ESCAPES[char] ?? char);
+// }
 
 /**
  * The statements of a block. Blocks are inlined by the grammar, so a block
@@ -445,7 +445,7 @@ function convertProperty(node: SyntaxNode): DeviceProp | DeviceChannelProp | Dev
     ...rangeOf(node),
     device,
     name: index.type === "String"
-      ? { type: "string", ...rangeOf(index), value: decodeString(index.text) }
+      ? { type: "string", ...rangeOf(index), value: index.text }
       : convertIdentifier(index),
     prop,
   };
@@ -500,7 +500,7 @@ export function convertExpression(node: SyntaxNode): Expression {
     case "Bool":
       return { type: "bool", ...rangeOf(node), value: node.text === "true" };
     case "String":
-      return { type: "string", ...rangeOf(node), value: decodeString(node.text) };
+      return { type: "string", ...rangeOf(node), value: node.text };
     case "VariableName":
       return convertIdentifier(node);
     case "Device":
