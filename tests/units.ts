@@ -1,7 +1,7 @@
 /**
  * Unit tests for the leaf libraries.
  *
- * These exist to demonstrate — not merely assert — that each library stands
+ * These exist to demonstrate - not merely assert - that each library stands
  * on its own: every test below constructs its subject directly and needs no
  * AST, no compiler, and no knowledge of the pipeline. Anything that needs a
  * whole `compile()` call belongs in the differential suite instead.
@@ -54,7 +54,7 @@ const inst = (partial: UnnumberedInst, id: number): Inst => ({ ...partial, id })
 const dummyNode: SyntaxNode = { type: "x", text: "", from: 0, to: 0, children: [] };
 
 // Folding and pressure consume the formal AST, so their subjects are built
-// directly in it — no parser, no conversion, no pipeline.
+// directly in it - no parser, no conversion, no pipeline.
 const at = { from: 0, to: 0 };
 const k = (value: number): Constant => ({ type: "constant", ...at, value });
 const id = (name: string): Identifier => ({ type: "identifier", ...at, name });
@@ -205,7 +205,7 @@ export function runUnitTests(): UnitResult[] {
   check("block still sees globals", block.lookup("g") !== null);
   equal("parent never sees the block's names", root.lookup("local"), null);
 
-  // late declarations in a SHARED scope are visible through both chains —
+  // late declarations in a SHARED scope are visible through both chains -
   // the maps are shared even though the chains are values
   root.declare("late", { kind: "device", pin: "d5" });
   check("block sees a global declared after the block was made",
@@ -230,7 +230,7 @@ export function runUnitTests(): UnitResult[] {
 
   // ------------------------------ liveness ------------------------------
   // A value defined before a loop and used inside it must stay live across
-  // the back edge — the case a single backward sweep gets wrong.
+  // the back edge - the case a single backward sweep gets wrong.
   const loopProgram: Inst[] = [
     inst({ op: "movev", dest: 0, src: { kind: "const", text: "1" }, node: dummyNode }, 0),
     inst({ op: "label", name: "top", node: dummyNode }, 1),

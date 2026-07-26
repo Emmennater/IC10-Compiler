@@ -5,8 +5,8 @@
  * Keeping the semantics in one place guarantees that "fold at compile time"
  * and "execute on the chip" agree (IC10 reference: https://stationeers-wiki.com/IC10).
  *
- * Everything here is keyed by the operator's *meaning* — the opcode the
- * formal AST already resolved the source spelling to — not by the spelling
+ * Everything here is keyed by the operator's *meaning* - the opcode the
+ * formal AST already resolved the source spelling to - not by the spelling
  * itself. An arithmetic opcode is its own IC10 instruction (`add`, `mod`),
  * so only the comparisons need tables at all.
  */

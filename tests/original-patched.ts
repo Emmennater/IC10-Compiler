@@ -10,7 +10,7 @@
  *      Constants are folded and propagated through variables, and copies
  *      never generate code (each assignment just remaps the variable name).
  *      Placeholder identifiers (anything not declared with `let`) are read
- *      and written only through `move` — they stand in for the l/s/lb/sb/...
+ *      and written only through `move` - they stand in for the l/s/lb/sb/...
  *      device instructions to come, which cannot appear as ALU operands.
  *      If/loop conditions compile to fused branches (ble/bgez/bnez/...);
  *      && and || short-circuit. A variable assigned inside a branch or loop
@@ -344,7 +344,7 @@ export function compile(ast: SyntaxNode,
     for (let i = scopes.length - 1; i >= 0; i--) {
       const symbol = scopes[i].get(name);
       if (symbol) {
-        // Caller variables are not visible inside a function body —
+        // Caller variables are not visible inside a function body -
         // except top-level globals, which functions may read and write
         // through the global's home register.
         if ((symbol.kind === "var" || symbol.kind === "alias") && i < functionScopeBase && i !== 0) return null;
@@ -551,7 +551,7 @@ export function compile(ast: SyntaxNode,
 
   /**
    * Function-call arguments: identifiers pass through verbatim (logic types,
-   * devices, defines — they are instruction operands, not values to load);
+   * devices, defines - they are instruction operands, not values to load);
    * strings name IC10 symbols directly; everything else compiles normally.
    */
   function compileCallArg(node: SyntaxNode): Operand {
@@ -946,7 +946,7 @@ export function compile(ast: SyntaxNode,
 
   /**
    * Collect assignment target names inside a block, including nested
-   * constructs and — since calls can write globals — the (transitive)
+   * constructs and - since calls can write globals - the (transitive)
    * write sets of every function called in it.
    */
   function collectAssignedNames(block: SyntaxNode[], out: Set<string>) {
@@ -1361,7 +1361,7 @@ export function compile(ast: SyntaxNode,
   }
 
   /**
-   * Names the function's body (and its callees') reads and assigns —
+   * Names the function's body (and its callees') reads and assigns -
    * syntactic and over-approximate; call sites filter them against the
    * global scope to find the globals that need home registers.
    */
@@ -1656,7 +1656,7 @@ export function compile(ast: SyntaxNode,
     }
     loweringStack.push(fn.name);
 
-    // PATCH 7: a jal-lowered body must not see the caller's loops — a
+    // PATCH 7: a jal-lowered body must not see the caller's loops - a
     // break/continue inside it would jump across the function boundary to
     // a loop label chosen at whichever call site triggered lowering
     const savedLoopStack = loopStack.splice(0, loopStack.length);
@@ -2302,7 +2302,7 @@ export function compile(ast: SyntaxNode,
    * Live ranges from converged dataflow, split into one segment per code
    * region (main and each function body). A value live across a call is
    * live inside the callee's positions too, so segments capture exactly
-   * where a register is needed — between its segments (other functions
+   * where a register is needed - between its segments (other functions
    * that never run while it is in flight) the register is free.
    */
   function computeSegments(program: Inst[]) {
@@ -2377,8 +2377,8 @@ export function compile(ast: SyntaxNode,
   }
 
   /**
-   * Move placeholder stores earlier — right after the value they store is
-   * computed — to shorten live ranges under register pressure. A store may
+   * Move placeholder stores earlier - right after the value they store is
+   * computed - to shorten live ranges under register pressure. A store may
    * not cross another placeholder access, a yield/sleep, control flow, or
    * its own value's definition, so the observable order is unchanged.
    */
@@ -2526,7 +2526,7 @@ export function compile(ast: SyntaxNode,
         if (pick === undefined) {
           // Spill the value that blocks its register the longest; break
           // ties toward the least-used one. Short-lived values are never
-          // worth spilling — freeing their register relieves nothing.
+          // worth spilling - freeing their register relieves nothing.
           const candidates = [...active.map(a => a.v), item.v].filter(v => !scratch.has(v));
           if (candidates.length === 0) {
             throw error("Expression too complex: not enough registers", program[item.start].node);
@@ -2626,7 +2626,7 @@ export function compile(ast: SyntaxNode,
       // PATCH 6: an instruction may both use and define the victim
       // (`i += 1` lowers to `add home home 1`). The original's if/else-if
       // took only the "defines" branch, redirecting the destination but
-      // never reloading the use — leaving the victim with uses and no
+      // never reloading the use - leaving the victim with uses and no
       // definition, which the next spill round then backed with a second,
       // never-written stack slot. Reload and store now share one scratch.
       const rewritten: Inst[] = [];

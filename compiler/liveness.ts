@@ -26,8 +26,8 @@ function setsEqual(a: Set<number>, b: Set<number>): boolean {
  * side-effect free) contribute no uses, so liveness and deadness are
  * computed against each other until stable.
  *
- * The analysis is monotone — facts are only ever added to `liveAtLabel` and
- * `retLive` — so it terminates, but the number of sweeps needed is bounded
+ * The analysis is monotone - facts are only ever added to `liveAtLabel` and
+ * `retLive` - so it terminates, but the number of sweeps needed is bounded
  * by the lattice height (labels x vregs, plus the interprocedural coupling),
  * not by the program length. The iteration cap below is therefore a
  * runaway guard, not a proof of sufficiency: exhausting it would mean the

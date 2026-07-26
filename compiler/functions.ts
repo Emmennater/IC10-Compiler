@@ -32,7 +32,7 @@ function assignedName(node: FormalSyntaxNode): string | null {
 }
 
 /**
- * Names the function's body (and its callees') reads and assigns —
+ * Names the function's body (and its callees') reads and assigns -
  * syntactic and over-approximate; call sites filter them against the
  * global scope to find the globals that need home registers.
  */
@@ -62,7 +62,7 @@ export function fnVarRefs(fn: FnInfo, fnTable: FnTable): { refs: Set<string>; wr
 
 /**
  * Collect assignment target names inside a block, including nested
- * constructs and — since calls can write globals — the (transitive)
+ * constructs and - since calls can write globals - the (transitive)
  * write sets of every function called in it.
  */
 export function collectAssignedNames(block: Statement[], fnTable: FnTable, out: Set<string>): void {

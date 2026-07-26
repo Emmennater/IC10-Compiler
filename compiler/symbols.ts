@@ -3,15 +3,15 @@
  * read-only parameters.
  *
  * A ScopeChain is an immutable value. Entering a block or a function body
- * does not modify anything — it constructs a new chain that shares the old
- * one — so there is no scope stack to unwind and no way for an error thrown
+ * does not modify anything - it constructs a new chain that shares the old
+ * one - so there is no scope stack to unwind and no way for an error thrown
  * mid-lowering to leave name resolution corrupted. Capturing "the caller's
  * scopes" for an inlined parameter is just keeping the chain you already
  * have.
  *
  * The Scope maps themselves are mutable on purpose: a declaration adds an
  * entry to the innermost scope, and every chain sharing that scope sees it,
- * exactly as lexical scoping demands. What is immutable is the *chain* —
+ * exactly as lexical scoping demands. What is immutable is the *chain* -
  * which scopes are visible, and where the function boundary sits.
  */
 
@@ -90,7 +90,7 @@ export class ScopeChain {
 
   /**
    * Resolve a name, innermost scope first. Caller variables are not visible
-   * inside a function body — except top-level globals, which functions may
+   * inside a function body - except top-level globals, which functions may
    * read and write through the global's home register.
    */
   lookup(name: string): Sym | null {
@@ -112,8 +112,8 @@ export class ScopeChain {
   }
 
   /**
-   * Count how many variables in any scope on this chain — including ones
-   * hidden by the function boundary — share this vreg as their value. Used
+   * Count how many variables in any scope on this chain - including ones
+   * hidden by the function boundary - share this vreg as their value. Used
    * by demotion to decide whether a variable owns its vreg outright.
    */
   valueRefCount(id: number): number {

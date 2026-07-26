@@ -37,7 +37,7 @@ const bracketLeft = (): SyntaxNode => node("BracketLeft", "[");
 const bracketRight = (): SyntaxNode => node("BracketRight", "]");
 const dot = (): SyntaxNode => node("Dot", ".");
 
-/** `a, b, c` — the separators the grammar puts between list items. */
+/** `a, b, c` - the separators the grammar puts between list items. */
 const commaSeparated = (items: SyntaxNode[]): SyntaxNode[] =>
   items.flatMap((item, i) => (i === 0 ? [item] : [node("Comma", ","), item]));
 

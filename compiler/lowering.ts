@@ -4,7 +4,7 @@
  * Constants are folded and propagated through variables, and copies never
  * generate code (each assignment just remaps the variable name).
  * Placeholder identifiers (anything not declared with `let`) are read and
- * written only through `move` — they stand in for the l/s/lb/sb/... device
+ * written only through `move` - they stand in for the l/s/lb/sb/... device
  * instructions to come, which cannot appear as ALU operands.
  *
  * If/loop conditions compile to fused branches (ble/bgez/bnez/...);
@@ -15,12 +15,12 @@
  * it); constant conditions skip branches entirely.
  *
  * The pass is built from FRAMES. A frame is an immutable description of
- * where code is being lowered — which buffer to emit into, which scopes are
+ * where code is being lowered - which buffer to emit into, which scopes are
  * visible, where `return` and `break` go, which functions are mid-lowering.
  * Entering a function body, a block, a loop, or an inlined parameter's
  * caller scope constructs a NEW frame; leaving it is simply returning from
  * the call. Nothing is saved and nothing is restored, because the caller's
- * frame was never modified — the JavaScript call stack is the only stack.
+ * frame was never modified - the JavaScript call stack is the only stack.
  */
 
 import type { ErrorReporter } from "./syntax.ts";
@@ -79,7 +79,7 @@ type ReturnTarget = { home: number; endLabel: string };
 /**
  * Services shared by every frame of one compilation: id sequences, label
  * naming, the function table, and the output region records. These are the
- * genuinely global registries — everything contextual lives on the frame.
+ * genuinely global registries - everything contextual lives on the frame.
  */
 type Services = {
   readonly errors: ErrorReporter;
@@ -112,7 +112,7 @@ type FrameContext = {
   readonly active: ReadonlySet<string>;
 };
 
-/** `set` plus one element, as a new set — frames never mutate their context. */
+/** `set` plus one element, as a new set - frames never mutate their context. */
 function including(set: ReadonlySet<string>, name: string): ReadonlySet<string> {
   return new Set(set).add(name);
 }
@@ -254,8 +254,8 @@ export class Lowerer {
 /**
  * One lexical frame of the lowering pass. `this` IS the context: the
  * methods below read their surroundings from immutable fields, and every
- * construct that changes those surroundings — a block, a loop body, a
- * function body, an inlined parameter's caller scope — runs in a new frame
+ * construct that changes those surroundings - a block, a loop body, a
+ * function body, an inlined parameter's caller scope - runs in a new frame
  * built by `withContext`. There is no save/restore anywhere in this file;
  * an error thrown from any depth simply unwinds through frames that were
  * never mutated in the first place.
@@ -375,7 +375,7 @@ class FrameLowerer {
 
   /**
    * Function-call arguments: identifiers pass through verbatim (logic types,
-   * devices, defines — they are instruction operands, not values to load);
+   * devices, defines - they are instruction operands, not values to load);
    * strings name IC10 symbols directly; everything else compiles normally.
    */
   private compileCallArg(node: Expression): Operand {
@@ -583,7 +583,7 @@ class FrameLowerer {
     if (symbol?.kind === "alias") {
       // Inlined read-only parameter: compile the argument expression in the
       // caller's chain, where its names resolve. The chain is an immutable
-      // value the alias captured for free — nothing to swap in or out.
+      // value the alias captured for free - nothing to swap in or out.
       return this.withContext({ chain: symbol.callerChain }).compileExpression(symbol.argNode);
     }
     // Placeholder read: must come into a register through a move
@@ -774,7 +774,7 @@ class FrameLowerer {
   // ---------------------- variable demotion at merges -------------------
   //
   // Demotion deliberately saves and restores VARIABLE KNOWLEDGE (what value
-  // a variable holds on this control-flow path) — that is the phi-avoidance
+  // a variable holds on this control-flow path) - that is the phi-avoidance
   // algorithm itself, modeling the program being compiled. It is not
   // compiler context; frames carry that.
 
@@ -1123,7 +1123,7 @@ class FrameLowerer {
     });
 
     // The body is one new frame: its own buffer, its own function scope,
-    // its own return target, a fresh statement cache — and NO enclosing
+    // its own return target, a fresh statement cache - and NO enclosing
     // loop, because a jal body must not jump to a loop label chosen at
     // whichever call site happened to trigger lowering (fix 7).
     const body = this.withContext({
@@ -1142,8 +1142,8 @@ class FrameLowerer {
   private emitFunctionBody(fn: FnInfo): void {
     // Inside the body a global's value may come from any call site: it
     // lives in its home register and compile-time constants are forgotten.
-    // (This save/restore is of variable KNOWLEDGE, like demotion — the
-    // algorithm modeling the program — not of compiler context.)
+    // (This save/restore is of variable KNOWLEDGE, like demotion - the
+    // algorithm modeling the program - not of compiler context.)
     const globalViews: { state: VarState; value: Operand | null; maybe: boolean }[] = [];
     for (const name of fnVarRefs(fn, this.fnTable).refs) {
       const symbol = this.chain.globalGet(name);

@@ -350,7 +350,7 @@ export const CASES: TestCase[] = [
   {
     // A placeholder read whose name matches a generated label. The original
     // substituted *any* token equal to a label name on *any* line, turning
-    // `move r0 scale` into `move r0 <lineNumber>` — a silent miscompile.
+    // `move r0 scale` into `move r0 <lineNumber>` - a silent miscompile.
     name: "remove-labels-name-collision",
     config: { removeLabels: true },
     ast: program(
@@ -366,7 +366,7 @@ export const CASES: TestCase[] = [
     // A break inside a jal-lowered function body. The original let it see
     // the loop enclosing whichever CALL SITE triggered lowering, emitting a
     // jump across the function boundary to that loop's end label (with `ra`
-    // still pending) — nonsense for every other call site. Now it errors.
+    // still pending) - nonsense for every other call site. Now it errors.
     name: "error-break-inside-function",
     ast: program(
       fnDef("f", [],

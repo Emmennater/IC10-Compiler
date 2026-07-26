@@ -1428,7 +1428,7 @@ export const cases = {
       "end",
     ],
     // count's home register is set up where the declaration is, not at
-    // the first call site — otherwise the loop would reset it every pass.
+    // the first call site - otherwise the loop would reset it every pass.
     expected: [
       "alias housing db",
       "j ProgramStart",

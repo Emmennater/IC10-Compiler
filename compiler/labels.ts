@@ -5,7 +5,7 @@
  * naming scheme is one screen of code rather than six counters scattered
  * through the lowering pass. Nothing outside this module should build a
  * label name by string concatenation, and nothing should infer a construct's
- * shape from a label's spelling — the IR records structure explicitly.
+ * shape from a label's spelling - the IR records structure explicitly.
  */
 
 /** The labels of one if/elif/else chain. */

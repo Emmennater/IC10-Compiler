@@ -75,7 +75,7 @@ export function renderProgram(program: Inst[], registerOf: Map<number, number>):
  * Strip label definition lines and replace each jump/branch target with the
  * absolute line number the label ends up on. Only the final token of a line
  * is ever a label reference (`j label`, `jal label`, `b.. args label`), so
- * only that token is substituted — an alias or define that happens to share
+ * only that token is substituted - an alias or define that happens to share
  * a label's name is left alone.
  */
 export function resolveLabels(output: string): string {

@@ -2,8 +2,8 @@ import { parser } from "../lezer/parser.js";
 import type { TreeCursor } from "@lezer/common";
 
 /**
- * A span of the source text. Everything downstream of parsing — diagnostics,
- * IR instructions — only ever needs this much of a node, so both the raw
+ * A span of the source text. Everything downstream of parsing - diagnostics,
+ * IR instructions - only ever needs this much of a node, so both the raw
  * parse tree and the typed tree in formal-ast.ts satisfy it.
  */
 export type SourceRange = {

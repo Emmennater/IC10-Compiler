@@ -26,7 +26,7 @@ export function foldTruthy(operand: ConstOperand | null): boolean | null {
 
 /**
  * Try to evaluate an expression to a compile-time constant without emitting
- * any code. `&&` and `||` fold when one side settles the outcome — the other
+ * any code. `&&` and `||` fold when one side settles the outcome - the other
  * side is pure, so skipping it is safe.
  *
  * Returns null whenever the value is not known at compile time, including
@@ -79,8 +79,8 @@ export function foldExpression(node: Expression, constantOf: ConstantLookup): Co
 
 /**
  * How many registers evaluating this subtree keeps busy at once
- * (Sethi–Ullman-style labeling). Only used to pick evaluation order —
- * evaluate the register-hungrier side first — so an imprecise answer costs
+ * (Sethi–Ullman-style labeling). Only used to pick evaluation order -
+ * evaluate the register-hungrier side first - so an imprecise answer costs
  * code quality, never correctness. Real allocation happens later over the
  * whole program.
  */

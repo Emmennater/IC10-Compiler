@@ -701,7 +701,7 @@ export function getFormalAST(root: SyntaxNode): Block {
 
 /**
  * Every child of a node, for the analyses that care about what appears
- * *somewhere* in a subtree — which names it reads, which it assigns — rather
+ * *somewhere* in a subtree - which names it reads, which it assigns - rather
  * than about the shape those names appear in. The formal analogue of `kids`.
  *
  * The name of a function (in a call or a definition) is deliberately not a

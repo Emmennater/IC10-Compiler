@@ -42,7 +42,7 @@ type Segment = { v: number; start: number; end: number };
  * Live ranges from converged dataflow, split into one segment per code
  * region (main and each function body). A value live across a call is
  * live inside the callee's positions too, so segments capture exactly
- * where a register is needed — between its segments (other functions
+ * where a register is needed - between its segments (other functions
  * that never run while it is in flight) the register is free.
  */
 function computeSegments(program: Inst[]) {
@@ -117,8 +117,8 @@ function computeSegments(program: Inst[]) {
 }
 
 /**
- * Move placeholder stores earlier — right after the value they store is
- * computed — to shorten live ranges under register pressure. A store may
+ * Move placeholder stores earlier - right after the value they store is
+ * computed - to shorten live ranges under register pressure. A store may
  * not cross another placeholder access, a yield/sleep, control flow, or
  * its own value's definition, so the observable order is unchanged.
  */
@@ -191,8 +191,8 @@ function replaceUses(inst: Inst, victim: number, replacement: number): Inst {
  * Rewrite every definition and use of `victim` to go through a fresh
  * scratch register backed by a fixed stack address.
  *
- * An instruction may both use and define the victim — `i += 1` lowers to
- * `add home home 1` — so the reload and the store must be able to happen
+ * An instruction may both use and define the victim - `i += 1` lowers to
+ * `add home home 1` - so the reload and the store must be able to happen
  * around the *same* instruction, sharing one scratch register:
  *
  *     get  s db addr
@@ -385,7 +385,7 @@ export function allocateRegisters(program: Inst[], context: AllocationContext): 
       if (pick === undefined) {
         // Spill the value that blocks its register the longest; break
         // ties toward the least-used one. Scratch values are never
-        // worth spilling — freeing their register relieves nothing.
+        // worth spilling - freeing their register relieves nothing.
         const candidates = [...active.map(a => a.v), item.v].filter(v => !scratch.has(v));
         if (candidates.length === 0) {
           throw errors.error("Expression too complex: not enough registers", program[item.start].node);
