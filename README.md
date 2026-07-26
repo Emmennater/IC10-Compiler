@@ -7,8 +7,9 @@ closure into a set of small libraries. The public API is unchanged:
 `index.ts`.
 
 ```ts
-import { compile } from "./index";
-const ic10 = compile(ast, { removeLabels: false });
+import { getAST } from "./ast.ts";
+import { compile } from "./index.ts";
+const ic10 = compile(getAST(source), { removeLabels: false });
 ```
 
 ## Architecture
@@ -45,7 +46,8 @@ flowchart TB
 
 | Module | Responsibility |
 | --- | --- |
-| `syntax.ts` | Parse-tree types, `CompileError`, `ErrorReporter`, all AST navigation |
+| `ast.ts` | The real parser: `getAST(text)` over the generated Lezer parser; defines `SyntaxNode`/`CompileError` |
+| `syntax.ts` | `ErrorReporter` and all AST navigation (re-exports `SyntaxNode`/`CompileError` from `ast.ts`) |
 | `tables.ts` | Opcode tables and the one shared implementation of IC10 arithmetic/comparison semantics |
 | `ir.ts` | Operands, the `Inst` union, id allocation, pure accessors, `assertNever` |
 | `folding.ts` | Constant folding and Sethi–Ullman pressure estimation — pure functions over the tree |
@@ -111,23 +113,29 @@ the harness distinguishes it from a regression.
 
 ## Verification
 
-Serve the folder (`python -m http.server 8892 --directory .`) and open
-`/tests/runner.html`. In the browser it:
+```sh
+npm install
+npm run typecheck   # tsc --noEmit, strict + noUnusedLocals/Parameters + noFallthroughCasesInSwitch
+npm test            # vitest: units + differential + language-case suites
+npm run dev          # vite dev server for the manual test-string page (index.html/main.js)
+```
 
-1. **Type-checks** every module with the real TypeScript compiler under
-   `strict`, `noUnusedLocals`, `noUnusedParameters`,
-   `noFallthroughCasesInSwitch`.
-2. Runs **96 unit tests** over the leaf libraries — no AST, no `compile()`.
-3. Runs **37 differential cases** through the pristine original, the patched
-   original, and the refactor, covering folding, ifs, all three loop kinds,
-   break/continue, inline and jal functions, non-leaf functions
-   (`push ra`/`pop ra`), constexpr evaluation and bail-out, aggregators,
-   define chains, aliases, slot ops, spilling under 2- and 3-register
-   orders, label resolution and name collision, and error paths.
-4. Asserts refactor ≡ patched original byte-for-byte, refactor ≡ pristine
-   original except on flagged cases, and that expected substrings appear.
+`npm test` runs three suites:
 
-Current status: **96/96 unit tests, 37/37 cases, 0 type errors.**
-`window.__RESULTS__.ok` is the single boolean summary.
+1. **96 unit tests** (`tests/units.test.ts`) over the leaf libraries — no
+   AST, no `compile()`.
+2. **37 differential cases** (`tests/cases.test.ts`), each hand-built AST
+   compiled through the pristine original, the patched original, and the
+   refactor, covering folding, ifs, all three loop kinds, break/continue,
+   inline and jal functions, non-leaf functions (`push ra`/`pop ra`),
+   constexpr evaluation and bail-out, aggregators, define chains, aliases,
+   slot ops, spilling under 2- and 3-register orders, label resolution and
+   name collision, and error paths. Asserts refactor ≡ patched original
+   byte-for-byte, refactor ≡ pristine original except on flagged cases, and
+   that expected substrings appear.
+3. **Language-level regression cases** (`tests/language-cases.test.mjs`,
+   wrapping `tests/test.mjs`) — real source strings through the actual
+   parser (`ast.ts` + `lezer/lang.grammar`) and `compile()`, asserting exact
+   output or error message. Also runnable standalone: `node tests/test.mjs`.
 
 r16 (sp) and r17 (ra) are reserved for stack and function support.

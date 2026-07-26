@@ -3,8 +3,8 @@
  * (referenced/assigned name sets) that call sites and variable demotion use.
  */
 
-import { kids, type SyntaxNode } from "./syntax";
-import type { Inst } from "./ir";
+import { kids, type SyntaxNode } from "./syntax.ts";
+import type { Inst } from "./ir.ts";
 
 /** A user-defined function, registered before anything is lowered. */
 export type FnInfo = {

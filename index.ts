@@ -22,16 +22,16 @@
  *   r16 (sp) and r17 (ra) are reserved for stack and function support.
  */
 
-import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax";
-import { IdAllocator } from "./ir";
-import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables";
-import { Lowerer } from "./lowering";
-import { optimize } from "./optimize";
-import { allocateRegisters } from "./regalloc";
-import { renderProgram, resolveLabels } from "./render";
+import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
+import { IdAllocator } from "./ir.ts";
+import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables.ts";
+import { Lowerer } from "./lowering.ts";
+import { optimize } from "./optimize.ts";
+import { allocateRegisters } from "./regalloc.ts";
+import { renderProgram, resolveLabels } from "./render.ts";
 
-export { CompileError } from "./syntax";
-export type { SyntaxNode } from "./syntax";
+export { CompileError } from "./syntax.ts";
+export type { SyntaxNode } from "./syntax.ts";
 
 export type Config = {
   /** Replace labels with absolute line numbers in the output. */

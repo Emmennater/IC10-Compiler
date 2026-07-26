@@ -1,0 +1,22 @@
+{
+  "name": "ic10-compiler",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate-parser": "lezer-generator lezer/lang.grammar -o lezer/parser.ts"
+  },
+  "dependencies": {
+    "@lezer/common": "^1.5.2",
+    "@lezer/lr": "^1.4.10"
+  },
+  "devDependencies": {
+    "@lezer/generator": "^1.8.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

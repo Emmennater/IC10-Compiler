@@ -4,7 +4,7 @@
  * later phase (dead code elimination, allocation, rendering) shares.
  */
 
-import type { SyntaxNode } from "./syntax";
+import type { SyntaxNode } from "./syntax.ts";
 
 // ------------------------------ operands --------------------------------
 

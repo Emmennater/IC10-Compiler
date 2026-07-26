@@ -6,7 +6,7 @@
  * the register allocator consume the converged label/return live-sets.
  */
 
-import { destOf, usesOf, hasSideEffect, type Inst } from "./ir";
+import { destOf, usesOf, hasSideEffect, type Inst } from "./ir.ts";
 
 export type LivenessInfo = {
   /** Live vregs at each label, i.e. live-in of the instruction following it. */

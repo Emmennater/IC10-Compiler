@@ -9,9 +9,9 @@
  * when they do not, so the driver can cheaply detect the fixed point.
  */
 
-import { destOf, usesOf, symsOf, hasSideEffect, type IfRegion, type Inst, type LoopRegion } from "./ir";
-import { INVERT_BRANCH } from "./tables";
-import { convergeLiveness } from "./liveness";
+import { destOf, usesOf, symsOf, hasSideEffect, type IfRegion, type Inst, type LoopRegion } from "./ir.ts";
+import { INVERT_BRANCH } from "./tables.ts";
+import { convergeLiveness } from "./liveness.ts";
 
 /** Keep only instructions that contribute to a side effect. */
 export function eliminateDeadCode(program: Inst[]): Inst[] {

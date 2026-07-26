@@ -3,6 +3,8 @@
     "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -11,6 +13,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["*.ts"],
-  "exclude": ["tests"]
+  "include": ["*.ts", "lezer/*.ts", "tests/*.ts"],
+  "exclude": ["node_modules", "tests/original.ts", "tests/original-patched.ts"]
 }

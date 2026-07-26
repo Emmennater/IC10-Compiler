@@ -9,13 +9,13 @@
  *  - every string in `expect` appears in the refactored output
  */
 
-import type { SyntaxNode } from "../syntax";
+import type { SyntaxNode } from "../syntax.ts";
 import {
   assign, bin, bool, brk, compound, constexprDirective, cont, decl, defineStmt,
   device, deviceDecl, elifArm, elseArm, fnCall, fnDef, ifArm, ifExpr, int,
   loopExpr, name, nameProp, num, parens, program, prop, repeatUntil, ret,
   sleepStmt, slotProp, str, un, whileExpr, yieldStmt,
-} from "./ast";
+} from "./ast.ts";
 
 export type TestCase = {
   name: string;

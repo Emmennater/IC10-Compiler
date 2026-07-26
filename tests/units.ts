@@ -7,18 +7,18 @@
  * whole `compile()` call belongs in the differential suite instead.
  */
 
-import { ErrorReporter, blockOf, conditionOf, kids, statementsIn } from "../syntax";
-import { applyArithmetic, compare, ic10Mod, isArithmetic, isComparison } from "../tables";
-import { IdAllocator, constOp, destOf, operandsOf, usesOf, hasSideEffect, symsOf } from "../ir";
-import { LabelFactory } from "../labels";
-import { StatementScope } from "../statement-scope";
-import { foldExpression, foldTruthy, pressure } from "../folding";
-import { ScopeChain, type Scope } from "../symbols";
-import { resolveLabels } from "../render";
-import { convergeLiveness } from "../liveness";
-import type { Inst, UnnumberedInst } from "../ir";
-import type { SyntaxNode } from "../syntax";
-import { bin, name, num, node, str, un, ifArm, elseArm, whileExpr, repeatUntil, decl } from "./ast";
+import { ErrorReporter, blockOf, conditionOf, kids, statementsIn } from "../syntax.ts";
+import { applyArithmetic, compare, ic10Mod, isArithmetic, isComparison } from "../tables.ts";
+import { IdAllocator, constOp, destOf, operandsOf, usesOf, hasSideEffect, symsOf } from "../ir.ts";
+import { LabelFactory } from "../labels.ts";
+import { StatementScope } from "../statement-scope.ts";
+import { foldExpression, foldTruthy, pressure } from "../folding.ts";
+import { ScopeChain, type Scope } from "../symbols.ts";
+import { resolveLabels } from "../render.ts";
+import { convergeLiveness } from "../liveness.ts";
+import type { Inst, UnnumberedInst } from "../ir.ts";
+import type { SyntaxNode } from "../syntax.ts";
+import { bin, name, num, node, str, un, ifArm, elseArm, whileExpr, repeatUntil, decl } from "./ast.ts";
 
 export type UnitResult = { name: string; pass: boolean; detail?: string };
 

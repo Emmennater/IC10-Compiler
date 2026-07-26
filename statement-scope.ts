@@ -16,13 +16,16 @@
  */
 export class StatementScope {
   private loads = new Map<string, number>();
+  private vregBase: number;
 
   /**
    * @param vregBase the first virtual register id belonging to the current
    * statement. A nested function body inherits the caller's base (its own
    * first statement will rebase it) — hence the parameter.
    */
-  constructor(private vregBase: number) {}
+  constructor(vregBase: number) {
+    this.vregBase = vregBase;
+  }
 
   /** The vreg already holding this placeholder in the current statement. */
   cachedLoad(name: string): number | undefined {

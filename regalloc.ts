@@ -11,14 +11,14 @@
  * for the future function call stack.
  */
 
-import type { ErrorReporter, SyntaxNode } from "./syntax";
+import type { ErrorReporter, SyntaxNode } from "./syntax.ts";
 import {
   assertNever, destOf, setDest, usesOf,
   type IdAllocator, type Inst, type Operand,
-} from "./ir";
-import { INVERT_BRANCH, STACK_TOP } from "./tables";
-import { convergeLiveness } from "./liveness";
-import { removeJumpsToNext, collectGarbageLabels } from "./optimize";
+} from "./ir.ts";
+import { INVERT_BRANCH, STACK_TOP } from "./tables.ts";
+import { convergeLiveness } from "./liveness.ts";
+import { removeJumpsToNext, collectGarbageLabels } from "./optimize.ts";
 
 export type AllocationResult = {
   /** The program after spill rewrites and post-allocation cleanups. */

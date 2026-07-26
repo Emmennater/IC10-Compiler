@@ -4,7 +4,7 @@
  * both, but resolved programs save lines).
  */
 
-import type { Inst, Operand } from "./ir";
+import type { Inst, Operand } from "./ir.ts";
 
 /** Render the allocated program as IC10 assembly text. */
 export function renderProgram(program: Inst[], registerOf: Map<number, number>): string {

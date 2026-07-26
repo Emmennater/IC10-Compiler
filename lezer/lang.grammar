@@ -1,0 +1,121 @@
+@precedence { call, neg, times @left, plus @left, comp @left, and @left, or @left }
+
+kw<term> { @specialize[@name={term}]<identifier, term> }
+kw_<term> { @specialize<identifier, term> }
+
+@top program { block }
+
+block { statement* }
+
+statement {
+  Declaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
+  kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
+  FunctionDef | Return | PreprocessorDirective
+}
+
+Declaration {
+  kw<"let"> VariableName
+  (Assign expression | BracketLeft Integer BracketRight (Assign ArrayInit)?)?
+}
+
+ArrayInit {
+  BracketLeft expression (Comma expression)* BracketRight
+}
+
+DeviceDeclaration { kw<"device"> VariableName Assign Device }
+
+Definition { kw<"define"> VariableName Assign expression }
+
+Assignment {
+  (VariableName | DeviceProperty | DeviceChannelProperty | DeviceNameProperty)
+  (Assign | CompoundAssignOp) expression
+}
+
+If { kw<"if"> expression kw<"then"> block }
+
+ElseIf { kw<"elif"> expression kw<"then"> block }
+
+Else { kw<"else"> block }
+
+IfExpr { If ElseIf* Else? kw<"end"> }
+
+LoopExpr { kw<"loop"> block kw<"end"> }
+
+WhileExpr { kw<"while"> expression kw<"do"> block kw<"end"> }
+
+RepeatUntilExpr { kw<"repeat"> block kw<"until"> expression }
+
+Instruction { kw_<"yield"> | kw_<"sleep"> expression }
+
+FunctionCall { FunctionName !call ParenLeft (expression (Comma expression)*)? ParenRight }
+
+FunctionDef {
+  kw<"fn"> FunctionName !call ParenLeft (VariableName (Comma VariableName)*)? ParenRight FunctionBlock
+  kw<"end">
+}
+
+FunctionBlock { block }
+
+Return { kw<"return"> expression }
+
+PreprocessorDirective { At DirectiveName }
+
+DirectiveName { kw_<"constexpr"> }
+
+expression { Number | Bool | VariableName | Device | DeviceProperty | DeviceChannelProperty |
+  DeviceNameProperty | Parens | UnaryOp | BinaryOp | FunctionCall | String }
+
+VariableName { identifier }
+
+FunctionName { identifier }
+
+
+deviceBase { VariableName | Device }
+
+DeviceProperty { deviceBase Dot VariableName }
+
+DeviceChannelProperty { deviceBase BracketLeft Integer BracketRight Dot VariableName }
+
+DeviceNameProperty { deviceBase BracketLeft (String | VariableName) BracketRight Dot VariableName }
+
+Parens { ParenLeft expression ParenRight }
+
+UnaryOp { !neg (AddOp | Not) expression }
+
+BinaryOp {
+  expression !times MulOp expression |
+  expression !plus AddOp expression |
+  expression !comp CompareOp expression |
+  expression !and LogicAnd expression |
+  expression !or LogicOr expression
+}
+
+Device { kw_<"d0"> | kw_<"d1"> | kw_<"d2"> | kw_<"d3"> | kw_<"d4"> | kw_<"d5"> | kw_<"db"> }
+
+Bool { kw_<"true"> | kw_<"false"> }
+
+@tokens {
+  identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
+  spaces { @whitespace }
+  Number { @digit+ ("." | "." @digit+)? }
+  Integer { @digit+ }
+  MulOp { "*" | "/" | "%" }
+  AddOp { "+" | "-" }
+  Not { "!" }
+  CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+  LogicAnd { "&&" }
+  LogicOr { "||" }
+  Assign { "=" }
+  CompoundAssignOp { "+=" | "-=" | "*=" | "/=" | "%=" }
+  ParenLeft { "(" }
+  ParenRight { ")" }
+  BracketLeft { "[" }
+  BracketRight { "]" }
+  Dot { "." }
+  Comma { "," }
+  At { "@" }
+  String { '"' (!["\\] | "\\" _)* '"' }
+  Comment { "#" ![\n]* }
+}
+
+@skip { spaces | Comment }

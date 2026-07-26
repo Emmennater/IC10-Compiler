@@ -7,16 +7,19 @@
  * the evaluation bail out, and the call is compiled normally instead.
  */
 
-import { kids, blockOf, conditionOf, EXPRESSION_TYPES, type SyntaxNode } from "./syntax";
-import { isArithmetic, isComparison, applyArithmetic, compare } from "./tables";
-import type { FnInfo, FnTable } from "./functions";
+import { kids, blockOf, conditionOf, EXPRESSION_TYPES, type SyntaxNode } from "./syntax.ts";
+import { isArithmetic, isComparison, applyArithmetic, compare } from "./tables.ts";
+import type { FnInfo, FnTable } from "./functions.ts";
 
 /** The body did something that only exists at runtime, or ran too long. */
 class BailSignal {}
 
 /** Non-local control flow inside the interpreted program. */
 class ReturnSignal {
-  constructor(readonly value: number) {}
+  readonly value: number;
+  constructor(value: number) {
+    this.value = value;
+  }
 }
 class BreakSignal {}
 class ContinueSignal {}
@@ -29,8 +32,11 @@ const MAX_STEPS = 200_000;
 
 export class ConstexprEvaluator {
   private steps = 0;
+  private readonly fnTable: FnTable;
 
-  constructor(private readonly fnTable: FnTable) {}
+  constructor(fnTable: FnTable) {
+    this.fnTable = fnTable;
+  }
 
   /**
    * Interpret a @constexpr function at compile time. Returns null when the

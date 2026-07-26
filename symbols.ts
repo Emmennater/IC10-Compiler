@@ -15,8 +15,8 @@
  * which scopes are visible, and where the function boundary sits.
  */
 
-import type { SyntaxNode } from "./syntax";
-import type { Operand } from "./ir";
+import type { SyntaxNode } from "./syntax.ts";
+import type { Operand } from "./ir.ts";
 
 /** One variable's compile-time state. */
 export type VarState = {
@@ -46,10 +46,13 @@ export type Scope = Map<string, Sym>;
  * caller's variables.
  */
 export class ScopeChain {
-  private constructor(
-    private readonly scopes: readonly Scope[],
-    private readonly base: number,
-  ) {}
+  private readonly scopes: readonly Scope[];
+  private readonly base: number;
+
+  private constructor(scopes: readonly Scope[], base: number) {
+    this.scopes = scopes;
+    this.base = base;
+  }
 
   /** The chain a program starts with: one empty global scope. */
   static root(): ScopeChain {

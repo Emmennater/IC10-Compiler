@@ -11,8 +11,11 @@
 /** The labels of one if/elif/else chain. */
 export class IfLabels {
   private elifIndex = 0;
+  private readonly index: number;
 
-  constructor(private readonly index: number) {}
+  constructor(index: number) {
+    this.index = index;
+  }
 
   /** Where every arm jumps once its body is done. */
   get end(): string {

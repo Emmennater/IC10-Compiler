@@ -5,29 +5,16 @@
  * carries its type name, source text, source range, and children (including
  * keyword and punctuation tokens). The helpers here are the only place that
  * knows how statements, conditions, and blocks are laid out inside a node.
+ *
+ * `SyntaxNode` and `CompileError` are defined in ast.ts (next to the actual
+ * Lezer parser that produces them) and re-exported here so the rest of the
+ * pipeline keeps importing them from "./syntax" as before.
  */
 
-/** One node of the parse tree produced by the editor's grammar. */
-export type SyntaxNode = {
-  type: string;
-  text: string;
-  from: number;
-  to: number;
-  children: SyntaxNode[];
-};
+import { CompileError, type SyntaxNode } from "./ast.ts";
 
-/** A compile-time diagnostic carrying the offending source range. */
-export class CompileError extends Error {
-  readonly from: number;
-  readonly to: number;
-
-  constructor(message: string, node: SyntaxNode) {
-    super(message);
-    this.name = "CompileError";
-    this.from = node.from;
-    this.to = node.to;
-  }
-}
+export { CompileError };
+export type { SyntaxNode };
 
 /**
  * Creates CompileErrors whose messages carry the 0-based source line

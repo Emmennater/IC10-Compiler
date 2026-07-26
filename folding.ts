@@ -8,9 +8,9 @@
  * and testable on its own, with a hand-built node and a stub scope.
  */
 
-import { kids, EXPRESSION_TYPES, type SyntaxNode } from "./syntax";
-import { constBoolOp, constOp, type ConstOperand } from "./ir";
-import { applyArithmetic, compare, isArithmetic, isComparison } from "./tables";
+import { kids, EXPRESSION_TYPES, type SyntaxNode } from "./syntax.ts";
+import { constBoolOp, constOp, type ConstOperand } from "./ir.ts";
+import { applyArithmetic, compare, isArithmetic, isComparison } from "./tables.ts";
 
 /** What folding needs to know about a name: its constant value, if any. */
 export type ConstantLookup = (name: string) => ConstOperand | null;

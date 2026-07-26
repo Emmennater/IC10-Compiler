@@ -27,23 +27,23 @@ import {
   kids, blockOf, conditionOf,
   EXPRESSION_TYPES, STATEMENT_TYPES,
   type ErrorReporter, type SyntaxNode,
-} from "./syntax";
+} from "./syntax.ts";
 import {
   constBoolOp, constOp, constTextOp, destOf, idRange, isConstText, isZero, setDest, symOp,
   type ConstOperand, type IdAllocator, type IfRegion, type Inst, type LoopRegion,
   type Operand, type UnnumberedInst,
-} from "./ir";
+} from "./ir.ts";
 import {
   AGGREGATORS, ALU_OPCODES, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OP_TYPES,
   OPCODE_ALIASES, SET_OPCODES,
   applyArithmetic, compare, isComparison,
-} from "./tables";
-import { ScopeChain, type Scope, type VarState } from "./symbols";
-import { collectAssignedNames, countReturns, fnVarRefs, type FnInfo, type FnTable } from "./functions";
-import { ConstexprEvaluator } from "./constexpr";
-import { LabelFactory } from "./labels";
-import { StatementScope } from "./statement-scope";
-import { foldExpression, pressure } from "./folding";
+} from "./tables.ts";
+import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
+import { collectAssignedNames, countReturns, fnVarRefs, type FnInfo, type FnTable } from "./functions.ts";
+import { ConstexprEvaluator } from "./constexpr.ts";
+import { LabelFactory } from "./labels.ts";
+import { StatementScope } from "./statement-scope.ts";
+import { foldExpression, pressure } from "./folding.ts";
 
 /** Everything phase 2 (optimization) needs from lowering. */
 export type LoweredProgram = {
@@ -115,12 +115,14 @@ function including(set: ReadonlySet<string>, name: string): ReadonlySet<string> 
 
 export class Lowerer {
   private readonly services: Services;
+  private readonly ast: SyntaxNode;
 
   constructor(
-    private readonly ast: SyntaxNode,
+    ast: SyntaxNode,
     errors: ErrorReporter,
     ids: IdAllocator,
   ) {
+    this.ast = ast;
     const fnTable: FnTable = new Map();
     this.services = {
       errors,
@@ -257,10 +259,13 @@ export class Lowerer {
  * never mutated in the first place.
  */
 class FrameLowerer {
-  constructor(
-    private readonly shared: Services,
-    private readonly cx: FrameContext,
-  ) {}
+  private readonly shared: Services;
+  private readonly cx: FrameContext;
+
+  constructor(shared: Services, cx: FrameContext) {
+    this.shared = shared;
+    this.cx = cx;
+  }
 
   /** A frame like this one, differing only in the given context fields. */
   private withContext(overrides: Partial<FrameContext>): FrameLowerer {

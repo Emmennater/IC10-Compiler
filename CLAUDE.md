@@ -10,40 +10,47 @@ differential harness compiles against, not dead code. Do not "clean it up".
 
 ## Build & test
 
-There is **no Node/npm on this PC**, so verification runs in the browser:
+Node is installed and the project runs through it — `npm install` once, then:
 
-- Serve the folder and open the runner: preview `ic10-tests` (port 8892,
-  `.claude\launch.json`) → `http://localhost:8892/tests/runner.html`.
-- The runner fetches the real TypeScript compiler from CDN and does four
-  things: **strict type-check** of every module against an in-memory
-  filesystem (`strict`, `noUnusedLocals`, `noUnusedParameters`,
-  `noFallthroughCasesInSwitch`), transpile+link with a small CommonJS shim,
-  run the **unit tests**, then run the **differential suite**.
-- **After any change the runner must report
-  `96/96 unit tests, 37/37 cases passed, 0 type errors`.**
-  `window.__RESULTS__.ok` is the single boolean for scripted checks.
-- **Adding a module?** Add it to `REFACTOR_FILES` in `tests\runner.html`.
-  A static file server cannot enumerate the directory, so that list is
-  manual; a missing entry fails loudly with `module not found`.
-- Both the page and its `fetch`es are `no-store`. Without that the browser
-  re-runs a cached copy and you verify code you are no longer editing —
-  this cost real debugging time once already.
+- `npm run typecheck` — `tsc --noEmit` (strict, `noUnusedLocals`,
+  `noUnusedParameters`, `noFallthroughCasesInSwitch`) over every module.
+  `tests\original.ts` and `tests\original-patched.ts` are excluded (kept
+  verbatim, not held to current strictness).
+- `npm test` — runs all three vitest suites (see below).
+- `npm run dev` — `vite`, serving `index.html` / `main.js`, a small page
+  that runs a source string through the real parser and `compile()` for
+  manual poking.
+- `npm run build` — `vite build`, mostly a sanity check that the demo page
+  and its imports resolve.
+- **After any change, both `npm run typecheck` and `npm test` must be
+  clean.**
+- Imports are explicit `.ts` (e.g. `from "./syntax.ts"`) throughout, per
+  `allowImportingTsExtensions` in `tsconfig.json`. Keep new imports
+  consistent with that.
 
-### The two test layers
+### The three test layers
 
-`tests\units.ts` (96 assertions) covers the leaf libraries directly — no
-AST, no `compile()` call. It is also the proof that those libraries really
-are independent: if a unit test needs to reach into the pipeline, the
-decomposition has regressed.
+`tests\units.ts` (96 assertions, run through `tests\units.test.ts`) covers
+the leaf libraries directly — no AST, no `compile()` call. It is also the
+proof that those libraries really are independent: if a unit test needs to
+reach into the pipeline, the decomposition has regressed.
 
-`tests\cases.ts` (37 programs) is the differential suite. Each hand-built
-AST is compiled three ways — pristine original, patched original, refactor —
-and the runner asserts:
+`tests\cases.ts` (37 programs, run through `tests\cases.test.ts`) is the
+hand-built-AST differential suite. Each case is compiled three ways —
+pristine original, patched original, refactor — and asserts:
 
 1. refactor output === patched-original output, **byte for byte**, always;
 2. refactor === pristine original too, *except* on cases flagged
    `expectOriginalDiff` (each such flag pins one documented bug fix);
 3. every substring in the case's `expect` list appears in the output.
+
+`tests\test.mjs` (run standalone with `node tests/test.mjs`, and through
+vitest via `tests\language-cases.test.mjs`) is a third, newer layer: source
+*strings* run through the real parser (`getAST` in `ast.ts` → `lezer/`) and
+straight through `compile()`, asserting the exact output or error message.
+Prefer adding cases here when the point is end-to-end behavior of real
+source text; use `tests\cases.ts` when you need to pin an exact hand-built
+AST shape (e.g. reproducing one of the seven documented bugs below).
 
 `tests\original-patched.ts` is the original with **only** the seven fixes
 below, each marked `// PATCH n:`. It exists so the harness can prove the
@@ -110,10 +117,17 @@ modeling the program being compiled.
 
 **Leaf libraries** — no knowledge of the pipeline; unit-tested directly:
 
-- `syntax.ts` — `SyntaxNode`, `CompileError`, `ErrorReporter`, and **all**
-  AST navigation (`kids`, `blockOf`, `conditionOf`, `statementsIn`). Bodies
-  are delimited by keyword tokens, not node type, because a function call is
-  both a statement and an expression.
+- `ast.ts` — the real parser: `getAST(text)` runs the generated Lezer
+  parser (`lezer/parser.ts`, built from `lezer/lang.grammar` — regenerate
+  with `npm run generate-parser` if the grammar changes) and walks its
+  `TreeCursor` into a plain `SyntaxNode` tree. `SyntaxNode` and
+  `CompileError` are defined here (not in `syntax.ts`) since they're the
+  parser's output shape; `syntax.ts` imports and re-exports both so every
+  other module still gets them from `"./syntax.ts"` unchanged.
+- `syntax.ts` — `ErrorReporter` and **all** AST navigation (`kids`,
+  `blockOf`, `conditionOf`, `statementsIn`). Bodies are delimited by
+  keyword tokens, not node type, because a function call is both a
+  statement and an expression.
 - `tables.ts` — opcode tables plus the single shared implementation of IC10
   arithmetic/comparison semantics; folding, constexpr, and codegen all call
   these, so fold-time and run-time semantics cannot drift (that drift *was*
@@ -161,8 +175,13 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
   optimizer needs (`nextIsElse`); reading a label's spelling to decide
   control-flow shape silently stops working the moment naming changes.
 - Recursion is rejected, not supported (the frame's `active` set).
-- Tests build ASTs by hand via `tests\ast.ts`; there is no parser in this
-  repo. When adding a language feature, add the builder there too.
+- There is a real parser (`ast.ts` + `lezer/lang.grammar`), but the
+  hand-built-AST differential suite still builds trees directly via
+  `tests\ast.ts` — that's what lets a case pin one exact node shape (e.g.
+  a documented bug fix) independent of what the grammar currently accepts.
+  When adding a language feature, update `lezer\lang.grammar`, regenerate
+  the parser, and add both a `tests\ast.ts` builder (for `tests\cases.ts`)
+  and a source-string case in `tests\test.mjs`.
 
 ## Known gaps (deliberate, not oversights)
 
@@ -181,3 +200,6 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
 - The differential oracle is a legacy implementation, so behavior both
   versions share is ratified rather than checked. Nothing executes the
   emitted IC10 or validates it against chip limits.
+- `lezer\ic10.grammar` (a grammar for IC10 *assembly* itself, not the
+  high-level language) exists but nothing generates or consumes it yet.
+  Only `lang.grammar` is wired into `ast.ts`.
