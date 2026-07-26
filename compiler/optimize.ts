@@ -2,14 +2,18 @@
  * Dead code elimination and control-flow cleanup, alternated to a fixed
  * point: ifs with all-empty arms disappear, a then-arm that is exactly
  * `break`/`continue` fuses into the conditional branch, code after an
- * unconditional jump is unreachable, jumps to the next label vanish, and
- * loops with empty bodies are pruned.
+ * unconditional jump is unreachable, jumps to the next label vanish,
+ * loops with empty bodies are pruned, and a chain of constant add/sub
+ * collapses into a single instruction.
  *
  * Passes return a new program array when they change something and null
  * when they do not, so the driver can cheaply detect the fixed point.
  */
 
-import { destOf, usesOf, symsOf, hasSideEffect, type IfRegion, type Inst, type LoopRegion } from "./ir.ts";
+import {
+  constOp, destOf, usesOf, symsOf, hasSideEffect,
+  type IfRegion, type Inst, type LoopRegion, type Operand,
+} from "./ir.ts";
 import { INVERT_BRANCH } from "./tables.ts";
 import { convergeLiveness } from "./liveness.ts";
 
@@ -240,6 +244,193 @@ export function collectGarbageLabels(program: Inst[]): Inst[] | null {
   return kept.length === program.length ? null : kept;
 }
 
+// ----------------------- constant offset folding -------------------------
+
+/**
+ * The value an add/sub against a literal produces: a carrier operand,
+ * optionally reflected, plus a constant - `sign * carrier + offset`. All
+ * four spellings land here, and composing two of them gives another one,
+ * which is what makes a chain of them collapsible:
+ *
+ *     add dest x K   ->   x + K        sub dest x K   ->   x + -K
+ *     add dest K x   ->   x + K        sub dest K x   ->   -x + K
+ */
+type Affine = { carrier: Operand; sign: 1 | -1; offset: number };
+
+/**
+ * Read an instruction as an affine value, or null if it is not one.
+ *
+ * Only integer literals qualify. Combining two offsets re-associates the
+ * chip's arithmetic, and in IEEE doubles `(x + 0.1) + 0.2` is genuinely
+ * not `x + 0.30000000000000004`; integers combine exactly, so folding
+ * those cannot change a result.
+ */
+function asAffine(inst: Inst): Affine | null {
+  if (inst.op !== "alu") return null;
+  if (inst.opcode !== "add" && inst.opcode !== "sub") return null;
+  if (inst.args.length !== 2) return null;
+  const [left, right] = inst.args;
+  // Checked first, so `sub dest K x` is only read as a reflection when the
+  // literal really is the one being subtracted *from*.
+  if (right.kind === "const") {
+    const offset = parseFloat(right.text);
+    if (!Number.isSafeInteger(offset)) return null;
+    return { carrier: left, sign: 1, offset: inst.opcode === "sub" ? -offset : offset };
+  }
+  if (left.kind === "const") {
+    const offset = parseFloat(left.text);
+    if (!Number.isSafeInteger(offset)) return null;
+    return { carrier: right, sign: inst.opcode === "sub" ? -1 : 1, offset };
+  }
+  return null;
+}
+
+/** The value `outer` produces when its own carrier is `inner`. */
+function compose(inner: Affine, outer: Affine): Affine {
+  return {
+    carrier: inner.carrier,
+    sign: (inner.sign * outer.sign) as 1 | -1,
+    offset: outer.sign * inner.offset + outer.offset,
+  };
+}
+
+/** Rebuild an alu instruction as `dest = value`, keeping its id. */
+function asAffineInst(inst: Extract<Inst, { op: "alu" }>, value: Affine): Inst | null {
+  if (!Number.isSafeInteger(value.offset)) return null;
+  if (value.sign < 0) {
+    // `offset - carrier`. An offset of 0 leaves `sub dest 0 carrier`,
+    // which is exactly what lowering emits for unary minus anyway.
+    const literal = constOp(value.offset);
+    return literal && {
+      id: inst.id, op: "alu", opcode: "sub",
+      dest: inst.dest, args: [literal, value.carrier], node: inst.node,
+    };
+  }
+  // Shifting by nothing is a copy, and `move` beats `add dest carrier 0`.
+  if (value.offset === 0) return { id: inst.id, op: "movev", dest: inst.dest, src: value.carrier, node: inst.node };
+  const literal = constOp(Math.abs(value.offset));
+  return literal && {
+    id: inst.id, op: "alu", opcode: value.offset > 0 ? "add" : "sub",
+    dest: inst.dest, args: [value.carrier, literal], node: inst.node,
+  };
+}
+
+/** Whether the instruction copies a register onto itself. */
+function isSelfMove(inst: Inst): boolean {
+  return inst.op === "movev" && inst.src.kind === "vreg" && inst.src.id === inst.dest;
+}
+
+/** Whether anything in [from, to) still reads the vreg. */
+function readBetween(program: Inst[], from: number, to: number, vreg: number, dropped: Set<number>): boolean {
+  for (let i = from; i < to; i++) {
+    if (!dropped.has(i) && usesOf(program[i]).includes(vreg)) return true;
+  }
+  return false;
+}
+
+/** Whether anything in [from, to) overwrites what the operand reads. */
+function writtenBetween(program: Inst[], from: number, to: number, carrier: Operand, dropped: Set<number>): boolean {
+  // Literals, and the alias/define names a sym operand spells, are immutable.
+  if (carrier.kind !== "vreg") return false;
+  for (let i = from; i < to; i++) {
+    if (!dropped.has(i) && destOf(program[i]) === carrier.id) return true;
+  }
+  return false;
+}
+
+/**
+ * Instructions that end a straight-line run, so a backward scan for a
+ * reaching definition can never cross one: a label is entered from
+ * anywhere, a jump or branch skips what follows, and a jal runs a body
+ * that writes the shared parameter and result vregs.
+ */
+function leavesStraightLine(inst: Inst): boolean {
+  return inst.op === "label" || inst.op === "jump" || inst.op === "branch" ||
+    inst.op === "jal" || inst.op === "ret";
+}
+
+/**
+ * Collapse a chain of constant add/sub into one instruction.
+ *
+ *     sub v1 v0 2        add v2 v0 1        add v1 v0 1        sub v2 510 v0
+ *     add v2 v1 3   ->                      sub v2 511 v1  ->
+ *
+ * Two shapes reach that from opposite directions:
+ *
+ *  - The producer writes some *other* register, so the consumer can read
+ *    the producer's own carrier instead. Nothing is deleted here - the
+ *    producer is simply left with no consumer, and dead code elimination
+ *    is what retires it. Only done when the producer's result has exactly
+ *    one reader, so the rewrite always shortens a live range rather than
+ *    trading one for a longer one.
+ *  - The producer accumulates into the very register the consumer
+ *    overwrites (`add h h 1` twice, the shape a demoted loop counter
+ *    lowers to). The carrier *is* what the producer clobbers, so the
+ *    consumer can only see the pre-producer value if the producer goes
+ *    away: the rewrite and the deletion are one edit, legal only when
+ *    nothing in between reads the register.
+ */
+export function foldConstantOffsets(program: Inst[]): Inst[] | null {
+  // Rewrites land in a working copy so that a consumer scanning backward
+  // sees folds already made ahead of it and chains of three or more
+  // collapse in a single sweep.
+  const working = [...program];
+  const dropped = new Set<number>(); // indices into working, not instruction ids
+
+  // Readers per vreg. Counted once up front: a rewrite only ever moves a
+  // read from a producer's dest onto that producer's carrier, and the
+  // guard below is always asked about a dest, whose count never grows.
+  const readers = new Map<number, number>();
+  for (const inst of program) {
+    for (const v of usesOf(inst)) readers.set(v, (readers.get(v) ?? 0) + 1);
+  }
+
+  let changed = false;
+  let runStart = 0;
+  for (let end = 0; end <= working.length; end++) {
+    if (end < working.length && !leavesStraightLine(working[end])) continue;
+
+    for (let j = runStart; j < end; j++) {
+      const consumer = working[j];
+      if (consumer.op !== "alu") continue;
+      const outer = asAffine(consumer);
+      if (outer === null || outer.carrier.kind !== "vreg") continue;
+      const carried = outer.carrier.id;
+
+      // The reaching definition is the nearest earlier write in the run.
+      let k = j - 1;
+      while (k >= runStart && (dropped.has(k) || destOf(working[k]) !== carried)) k--;
+      if (k < runStart) continue;
+
+      const inner = asAffine(working[k]);
+      if (inner === null) continue;
+
+      const accumulates = inner.carrier.kind === "vreg" && inner.carrier.id === carried;
+      if (accumulates) {
+        if (consumer.dest !== carried) continue;
+        if (readBetween(working, k + 1, j, carried, dropped)) continue;
+      } else {
+        if (readers.get(carried) !== 1) continue;
+        if (writtenBetween(working, k + 1, j, inner.carrier, dropped)) continue;
+      }
+
+      const folded = asAffineInst(consumer, compose(inner, outer));
+      if (folded === null) continue;
+      working[j] = folded;
+      // A chain that composes back to the identity leaves the register
+      // holding what it already held, so the copy itself goes too.
+      if (isSelfMove(folded)) dropped.add(j);
+      if (accumulates) dropped.add(k);
+      changed = true;
+    }
+
+    runStart = end + 1;
+  }
+
+  if (!changed) return null;
+  return working.filter((_, i) => !dropped.has(i));
+}
+
 /**
  * Run dead code elimination and the structural cleanups until none of them
  * finds anything left to do.
@@ -252,7 +443,11 @@ export function optimize(program: Inst[], ifRegions: IfRegion[], loopRegions: Lo
       pruneEmptyLoops(program, loopRegions) ??
       removeUnreachable(program) ??
       removeJumpsToNext(program) ??
-      collectGarbageLabels(program);
+      collectGarbageLabels(program) ??
+      // Last: the structural passes merge straight-line runs by deleting
+      // the jumps and labels between them, so folding sees the longest
+      // runs once they have finished.
+      foldConstantOffsets(program);
     if (!next) return program;
     program = next;
   }

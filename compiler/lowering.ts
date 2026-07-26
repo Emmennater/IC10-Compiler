@@ -420,14 +420,14 @@ class FrameLowerer {
       from: node.from,
       to: node.to,
       type: "binaryop",
-      left: {
+      left: node.index,
+      right: {
         from: node.index.from,
         to: node.index.to,
         type: "constant",
         value: list.start
       } as Expression,
-      right: node.index,
-      opcode: "sub" as ArithmeticOpcode,
+      opcode: "add" as ArithmeticOpcode,
     });
 
     const dest = this.ids.newVreg();
@@ -1369,14 +1369,14 @@ class FrameLowerer {
         from: target.from,
         to: target.to,
         type: "binaryop",
-        left: {
+        left: target.index,
+        right: {
           from: target.index.from,
           to: target.index.to,
           type: "constant",
           value: list.start
         } as Expression,
-        right: target.index,
-        opcode: "sub" as ArithmeticOpcode,
+        opcode: "add" as ArithmeticOpcode,
       });
       this.emit({ op: "poke", addr, src: value, node: statement });
       return;
@@ -1471,12 +1471,13 @@ class FrameLowerer {
       baseAddr -= decl.size;
     }
 
-    this.shared.arrayTable.set(name, { start: baseAddr, size });
+    const start = baseAddr - size + 1;
+    this.shared.arrayTable.set(name, { start, size });
     this.emit({ op: "reserve", name, size, node: statement });
 
     for (let i = 0; i < list.length; i++) {
       const src = this.compileExpression(list[i]);
-      const addr = { kind: "const", text: String(baseAddr - i) } as Operand;
+      const addr = { kind: "const", text: String(start + i) } as Operand;
       this.emit({ op: "poke", addr: addr, src, node: statement });
     }
   }

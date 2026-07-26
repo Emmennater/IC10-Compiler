@@ -262,6 +262,11 @@ export const CASES: TestCase[] = [
       "o3 = +p",
       "o4 = -(p + 2)",
     ],
+    // fix 8: `-(p + 2)` lowers to `add r0 r0 2` then the `sub r0 0 r0` of
+    // unary minus - a shift feeding a reflection, so the two compose into
+    // `sub r0 -2 r0`. The pristine original keeps both.
+    expect: ["sub r0 -2 r0"],
+    expectOriginalDiff: true,
   },
   {
     name: "dead-code-eliminated",
@@ -457,5 +462,56 @@ export const CASES: TestCase[] = [
       "device p = d0",
       "q = p",
     ],
+  },
+  // ------------------- fix 8: constant offset folding --------------------
+  // The pristine original has no such pass and emits one instruction per
+  // link of the chain, so all three cases below flag expectOriginalDiff.
+  {
+    name: "fold-offsets-accumulator",
+    // Both shifts write the register the previous one wrote, so folding
+    // has to delete the producer, not just redirect the read.
+    source: [
+      "let x = a",
+      "x += 1",
+      "x += 1",
+      "b = x",
+    ],
+    expect: ["move r0 a", "add r0 r0 2", "move b r0"],
+    expectOriginalDiff: true,
+  },
+  {
+    name: "fold-offsets-through-temporaries",
+    // Each shift writes a fresh temporary, so the consumer reads the
+    // producer's carrier instead and dead code elimination retires the
+    // producers. The two deltas also cancel in sign: -2 then +3 is +1.
+    source: [
+      "let x = a",
+      "b = x - 2 + 3",
+    ],
+    expect: ["move r0 a", "add r0 r0 1", "move b r0"],
+    expectOriginalDiff: true,
+  },
+  {
+    name: "fold-offsets-into-a-reflection",
+    // `sub r0 511 r0` reflects rather than shifts, so composing it with
+    // the shift feeding it flips that shift's sign: 511 - (a + 1) is
+    // 510 - a. This is the shape list address arithmetic lowers to.
+    source: [
+      "let y = a + 1",
+      "z = 511 - y",
+    ],
+    expect: ["move r0 a", "sub r0 510 r0", "move z r0"],
+    expectOriginalDiff: true,
+  },
+  {
+    name: "fold-offsets-cancelling-to-a-copy",
+    // A chain summing to zero is a copy, so it renders as `move`, never
+    // as `add r0 r0 0`.
+    source: [
+      "let x = a",
+      "b = x + 2 - 2",
+    ],
+    expect: ["move r0 a", "move b r0"],
+    expectOriginalDiff: true,
   },
 ];

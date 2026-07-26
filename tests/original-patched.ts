@@ -2294,6 +2294,134 @@ export function compile(ast: SyntaxNode,
     return kept.length === program.length ? null : kept;
   }
 
+  // PATCH 8: constant offset folding. The original had no such pass, so a
+  // chain of add/sub against literals stayed one instruction per link:
+  // `x += 2; x -= 3` emitted `add r0 r0 2` then `sub r0 r0 3` instead of a
+  // single `sub r0 r0 1`, and `511 - (a + 1)` kept both halves instead of
+  // becoming `sub r0 510 r0`. Ported verbatim from compiler/optimize.ts so
+  // the differential oracle still checks every case byte for byte; see
+  // that file for the reasoning behind each guard.
+  type Affine = { carrier: Operand; sign: 1 | -1; offset: number };
+
+  function asAffine(inst: Inst): Affine | null {
+    if (inst.op !== "alu") return null;
+    if (inst.opcode !== "add" && inst.opcode !== "sub") return null;
+    if (inst.args.length !== 2) return null;
+    const [left, right] = inst.args;
+    if (right.kind === "const") {
+      const offset = parseFloat(right.text);
+      if (!Number.isSafeInteger(offset)) return null;
+      return { carrier: left, sign: 1, offset: inst.opcode === "sub" ? -offset : offset };
+    }
+    if (left.kind === "const") {
+      const offset = parseFloat(left.text);
+      if (!Number.isSafeInteger(offset)) return null;
+      return { carrier: right, sign: inst.opcode === "sub" ? -1 : 1, offset };
+    }
+    return null;
+  }
+
+  function compose(inner: Affine, outer: Affine): Affine {
+    return {
+      carrier: inner.carrier,
+      sign: (inner.sign * outer.sign) as 1 | -1,
+      offset: outer.sign * inner.offset + outer.offset,
+    };
+  }
+
+  function asAffineInst(inst: Extract<Inst, { op: "alu" }>, value: Affine): Inst | null {
+    if (!Number.isSafeInteger(value.offset)) return null;
+    if (value.sign < 0) {
+      const literal = constOp(value.offset);
+      return literal && {
+        id: inst.id, op: "alu", opcode: "sub",
+        dest: inst.dest, args: [literal, value.carrier], node: inst.node,
+      };
+    }
+    if (value.offset === 0) return { id: inst.id, op: "movev", dest: inst.dest, src: value.carrier, node: inst.node };
+    const literal = constOp(Math.abs(value.offset));
+    return literal && {
+      id: inst.id, op: "alu", opcode: value.offset > 0 ? "add" : "sub",
+      dest: inst.dest, args: [value.carrier, literal], node: inst.node,
+    };
+  }
+
+  function isSelfMove(inst: Inst): boolean {
+    return inst.op === "movev" && inst.src.kind === "vreg" && inst.src.id === inst.dest;
+  }
+
+  function readBetween(program: Inst[], from: number, to: number, vreg: number, dropped: Set<number>): boolean {
+    for (let i = from; i < to; i++) {
+      if (!dropped.has(i) && usesOf(program[i]).includes(vreg)) return true;
+    }
+    return false;
+  }
+
+  function writtenBetween(program: Inst[], from: number, to: number, carrier: Operand, dropped: Set<number>): boolean {
+    if (carrier.kind !== "vreg") return false;
+    for (let i = from; i < to; i++) {
+      if (!dropped.has(i) && destOf(program[i]) === carrier.id) return true;
+    }
+    return false;
+  }
+
+  function leavesStraightLine(inst: Inst): boolean {
+    return inst.op === "label" || inst.op === "jump" || inst.op === "branch" ||
+      inst.op === "jal" || inst.op === "ret";
+  }
+
+  function foldConstantOffsets(program: Inst[]): Inst[] | null {
+    const working = [...program];
+    const dropped = new Set<number>();
+
+    const readers = new Map<number, number>();
+    for (const inst of program) {
+      for (const v of usesOf(inst)) readers.set(v, (readers.get(v) ?? 0) + 1);
+    }
+
+    let changed = false;
+    let runStart = 0;
+    for (let end = 0; end <= working.length; end++) {
+      if (end < working.length && !leavesStraightLine(working[end])) continue;
+
+      for (let j = runStart; j < end; j++) {
+        const consumer = working[j];
+        if (consumer.op !== "alu") continue;
+        const outer = asAffine(consumer);
+        if (outer === null || outer.carrier.kind !== "vreg") continue;
+        const carried = outer.carrier.id;
+
+        let k = j - 1;
+        while (k >= runStart && (dropped.has(k) || destOf(working[k]) !== carried)) k--;
+        if (k < runStart) continue;
+
+        const inner = asAffine(working[k]);
+        if (inner === null) continue;
+
+        const accumulates = inner.carrier.kind === "vreg" && inner.carrier.id === carried;
+        if (accumulates) {
+          if (consumer.dest !== carried) continue;
+          if (readBetween(working, k + 1, j, carried, dropped)) continue;
+        } else {
+          if (readers.get(carried) !== 1) continue;
+          if (writtenBetween(working, k + 1, j, inner.carrier, dropped)) continue;
+        }
+
+        const folded = asAffineInst(consumer, compose(inner, outer));
+        if (folded === null) continue;
+        working[j] = folded;
+        if (isSelfMove(folded)) dropped.add(j);
+        if (accumulates) dropped.add(k);
+        changed = true;
+      }
+
+      runStart = end + 1;
+    }
+
+    if (!changed) return null;
+    return working.filter((_, i) => !dropped.has(i));
+  }
+
   // ---------------------------------------------------------------------
   // 3. Linear-scan register allocation with store sinking and spilling
   // ---------------------------------------------------------------------
@@ -2706,7 +2834,8 @@ export function compile(ast: SyntaxNode,
       pruneEmptyLoops(program) ??
       removeUnreachable(program) ??
       removeJumpsToNext(program) ??
-      collectGarbageLabels(program);
+      collectGarbageLabels(program) ??
+      foldConstantOffsets(program); // PATCH 8
     if (!next) break;
     program = next;
   }

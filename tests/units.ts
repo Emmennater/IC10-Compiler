@@ -18,7 +18,8 @@ import { foldExpression, foldTruthy, pressure } from "../compiler/folding.ts";
 import { ScopeChain, type Scope } from "../compiler/symbols.ts";
 import { resolveLabels } from "../compiler/render.ts";
 import { convergeLiveness } from "../compiler/liveness.ts";
-import type { Inst, UnnumberedInst } from "../compiler/ir.ts";
+import { foldConstantOffsets } from "../compiler/optimize.ts";
+import type { Inst, Operand, UnnumberedInst } from "../compiler/ir.ts";
 import type { SyntaxNode } from "../compiler/syntax.ts";
 import type {
   ArithmeticOpcode, BinaryOp, ComparisonOp, ComparisonOpcode, Constant, Expression,
@@ -240,6 +241,131 @@ export function runUnitTests(): UnitResult[] {
   const live = convergeLiveness(loopProgram);
   check("value used in a loop body is live at the loop head",
     live.liveAtLabel.get("top")?.has(0) === true);
+
+  // ------------------------ constant offset folding ---------------------
+  // The pass takes IR and returns IR, so it is exercised here directly:
+  // no AST, no compile() call, no register allocator.
+  const shift = (opcode: string, dest: number, args: Operand[], id: number): Inst =>
+    inst({ op: "alu", opcode, dest, args, node: dummyNode }, id);
+  const vreg = (id: number): Operand => ({ kind: "vreg", id });
+  const lit = (t: string): Operand => ({ kind: "const", text: t });
+  /** Render just the opcode/operand shape, so ids and nodes stay out of the way. */
+  const shapes = (program: Inst[] | null): string[] =>
+    (program ?? []).map(i =>
+      i.op === "alu" ? `${i.opcode} v${i.dest} ${i.args.map(a => a.kind === "vreg" ? `v${a.id}` : a.text).join(" ")}`
+      : i.op === "movev" ? `move v${i.dest} ${i.src.kind === "vreg" ? `v${i.src.id}` : i.src.text}`
+      : i.op);
+
+  // Accumulator shape: both shifts write v0, so the producer must be
+  // deleted - redirecting the read alone would double-count it.
+  equal("folding merges a chained accumulator",
+    shapes(foldConstantOffsets([
+      shift("add", 0, [vreg(0), lit("1")], 0),
+      shift("add", 0, [vreg(0), lit("1")], 1),
+    ])),
+    ["add v0 v0 2"]);
+
+  // Temporary shape: the consumer takes over the producer's carrier and
+  // the producer is left for dead code elimination, still present here.
+  equal("folding redirects through a temporary and cancels signs",
+    shapes(foldConstantOffsets([
+      shift("sub", 1, [vreg(0), lit("2")], 0),
+      shift("add", 2, [vreg(1), lit("3")], 1),
+    ])),
+    ["sub v1 v0 2", "add v2 v0 1"]);
+
+  equal("a chain summing to zero becomes a copy",
+    shapes(foldConstantOffsets([
+      shift("add", 1, [vreg(0), lit("2")], 0),
+      shift("sub", 2, [vreg(1), lit("2")], 1),
+    ])),
+    ["add v1 v0 2", "move v2 v0"]);
+
+  // Three links collapse in one sweep: the middle instruction is already
+  // rewritten by the time the last one scans back for its definition.
+  equal("three links collapse in a single pass",
+    shapes(foldConstantOffsets([
+      shift("add", 1, [vreg(0), lit("1")], 0),
+      shift("add", 2, [vreg(1), lit("2")], 1),
+      shift("add", 3, [vreg(2), lit("3")], 2),
+    ])).slice(-1),
+    ["add v3 v0 6"]);
+
+  // `add` commutes, so a const-first producer folds too.
+  equal("folding reads a commuted const-first add",
+    shapes(foldConstantOffsets([
+      shift("add", 1, [lit("4"), vreg(0)], 0),
+      shift("add", 2, [vreg(1), lit("1")], 1),
+    ])).slice(-1),
+    ["add v2 v0 5"]);
+
+  // `sub v1 5 v0` reflects rather than shifts, so composing it with a
+  // shift flips that shift's sign: 5 - v0 + 1 is 6 - v0.
+  equal("a shift after a reflection keeps the reflection",
+    shapes(foldConstantOffsets([
+      shift("sub", 1, [lit("5"), vreg(0)], 0),
+      shift("add", 2, [vreg(1), lit("1")], 1),
+    ])).slice(-1),
+    ["sub v2 6 v0"]);
+
+  // The reverse order: 511 - (v0 + 1) is 510 - v0.
+  equal("a reflection after a shift absorbs it",
+    shapes(foldConstantOffsets([
+      shift("add", 1, [vreg(0), lit("1")], 0),
+      shift("sub", 2, [lit("511"), vreg(1)], 1),
+    ])).slice(-1),
+    ["sub v2 510 v0"]);
+
+  // Two reflections cancel back to a shift: 20 - (511 - v0) is v0 - 491.
+  equal("two reflections compose back to a shift",
+    shapes(foldConstantOffsets([
+      shift("sub", 1, [lit("511"), vreg(0)], 0),
+      shift("sub", 2, [lit("20"), vreg(1)], 1),
+    ])).slice(-1),
+    ["sub v2 v0 491"]);
+
+  // Composing to the identity leaves the register holding what it already
+  // held, so the copy is dropped outright rather than emitted as a move.
+  equal("a chain composing to the identity disappears",
+    shapes(foldConstantOffsets([
+      shift("sub", 0, [lit("5"), vreg(0)], 0),
+      shift("sub", 0, [lit("5"), vreg(0)], 1),
+    ])),
+    []);
+
+  // A second reader means folding would stretch v0's live range to save
+  // v1's instead of retiring one, so the guard declines.
+  check("a producer with two readers is left alone",
+    foldConstantOffsets([
+      shift("add", 1, [vreg(0), lit("1")], 0),
+      shift("add", 2, [vreg(1), lit("2")], 1),
+      shift("mul", 3, [vreg(1), lit("2")], 2),
+    ]) === null);
+
+  // Non-integer literals re-associate the chip's arithmetic, so they are
+  // not folded: (x + 0.1) + 0.2 is not x + 0.30000000000000004.
+  check("fractional shifts are not merged",
+    foldConstantOffsets([
+      shift("add", 1, [vreg(0), lit("0.1")], 0),
+      shift("add", 2, [vreg(1), lit("0.2")], 1),
+    ]) === null);
+
+  // A label can be entered from anywhere, so the run ends there and the
+  // second shift never finds the first as its reaching definition.
+  check("folding does not cross a label",
+    foldConstantOffsets([
+      shift("add", 0, [vreg(0), lit("1")], 0),
+      inst({ op: "label", name: "top", node: dummyNode }, 1),
+      shift("add", 0, [vreg(0), lit("1")], 2),
+    ]) === null);
+
+  // Deleting the producer would strand the reader between the two.
+  check("an accumulator read in between is not fused",
+    foldConstantOffsets([
+      shift("add", 0, [vreg(0), lit("1")], 0),
+      inst({ op: "storename", name: "out", src: vreg(0), node: dummyNode }, 1),
+      shift("add", 0, [vreg(0), lit("1")], 2),
+    ]) === null);
 
   // ---------------------------- resolveLabels ---------------------------
   equal("resolveLabels rewrites a jump target",

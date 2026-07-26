@@ -1371,10 +1371,12 @@ export const cases = {
       "x %= 5",
       "b = x",
     ],
+    // `+= 2` then `-= 3` are two constant shifts of the same register, so
+    // constant offset folding merges them into `sub r0 r0 1`. `+=` lowering
+    // to a plain `add` on its own is pinned by the placeholder case below.
     expected: [
       "move r0 a",
-      "add r0 r0 2",
-      "sub r0 r0 3",
+      "sub r0 r0 1",
       "mul r0 r0 -12",
       "div r0 r0 4",
       "mod r0 r0 5",
@@ -1412,6 +1414,85 @@ export const cases = {
   "compound assignment is mod, not remainder": {
     source: "a = -5 % 3",
     expected: "move a 1",
+  },
+  // Constant offset folding. Nothing here is foldable at lowering time:
+  // every chain starts from a placeholder read, so the shifts survive into
+  // the IR and it is the optimizer that has to merge them.
+  "chained shifts on a placeholder collapse": {
+    source: "b = a + 1 + 2 + 3",
+    expected: "move r0 a\nadd r0 r0 6\nmove b r0",
+  },
+  "chained shifts cancel in sign": {
+    source: "let x = a\nx += 2\nx -= 7\nb = x",
+    expected: "move r0 a\nsub r0 r0 5\nmove b r0",
+  },
+  "a chain summing to zero is just a copy": {
+    source: "b = a + 2 - 2",
+    expected: "move r0 a\nmove b r0",
+  },
+  // The loop counter shape: `i` is demoted to a home register, so both
+  // bumps write it and folding has to delete the first, not just redirect
+  // the second's read.
+  "repeated bumps of a loop counter merge": {
+    source: [
+      "let i = 0",
+      "loop",
+      "  i += 1",
+      "  i += 1",
+      "  d0.Setting = i",
+      "  yield",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "loop0:",
+      "add r0 r0 2",
+      "s d0 Setting r0",
+      "yield",
+      "j loop0",
+    ],
+  },
+  // An opcode that is not a shift breaks the chain: the reaching
+  // definition of the last add is the mul, so there is nothing to merge.
+  "a multiply between two shifts blocks the merge": {
+    source: "let x = a\nx += 2\nx *= 2\nx += 3\nb = x",
+    expected: "move r0 a\nadd r0 r0 2\nmul r0 r0 2\nadd r0 r0 3\nmove b r0",
+  },
+  // A const-first sub reflects the carrier instead of shifting it, so
+  // composing the two flips the shift's sign: 511 - (a + 1) is 510 - a.
+  "a reflection absorbs the shift feeding it": {
+    source: "let y = a + 1\nz = 511 - y",
+    expected: "move r0 a\nsub r0 510 r0\nmove z r0",
+  },
+  "a shift after a reflection keeps the reflection": {
+    source: "let y = 511 - a\nz = y + 3",
+    expected: "move r0 a\nsub r0 514 r0\nmove z r0",
+  },
+  "two reflections compose back to a shift": {
+    source: "let y = 511 - a\nz = 20 - y",
+    expected: "move r0 a\nsub r0 r0 491\nmove z r0",
+  },
+  // Unary minus lowers to `sub r0 0 r0`, a reflection like any other.
+  "negating a shifted value composes": {
+    source: "b = -(a + 2)",
+    expected: "move r0 a\nsub r0 -2 r0\nmove b r0",
+  },
+  // Address arithmetic is `start + index`, so a constant index offset
+  // folds into the address computation itself.
+  "list indexing folds a constant index offset": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "let n = a",
+      "b = arr[n + 1]",
+    ],
+    expected: [
+      "poke 510 1",
+      "poke 511 2",
+      "move r0 a",
+      "add r0 r0 511",
+      "get r0 db r0",
+      "move b r0",
+    ],
   },
   "globals initialize before loops that call functions": {
     source: [
