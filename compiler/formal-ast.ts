@@ -175,7 +175,7 @@ export type Return = Range & {
 
 // define <identifier> = <expression>
 export type DefineDef = Range & {
-  type: "define";
+  type: "definedef";
   name: Identifier;
   value: Expression;
 };
@@ -639,7 +639,7 @@ export function convertStatement(node: SyntaxNode): Statement {
       const assign = parts.findIndex(c => c.type === "Assign");
       if (!nameNode || assign < 0) fail("Malformed definition", node);
       return {
-        type: "define",
+        type: "definedef",
         ...rangeOf(node),
         name: convertIdentifier(nameNode),
         value: convertExpression(parts[assign + 1]),
@@ -732,7 +732,7 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
       return [];
     case "sleep": return [node.duration];
     case "return": return [node.value];
-    case "define": return [node.name, node.value];
+    case "definedef": return [node.name, node.value];
     case "devicedef": return [node.name, node.device];
     case "functiondef": return [...node.args, node.body];
     case "functioncall": return node.params;

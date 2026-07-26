@@ -53,7 +53,7 @@ describe("declarations and definitions", () => {
   test("define takes an arbitrary expression", () => {
     const statement = only("define MAX = 2 * 3") as DefineDef;
     expect(statement).toMatchObject({
-      type: "define",
+      type: "definedef",
       name: { name: "MAX" },
       value: { type: "binaryop", opcode: "mul" },
     });

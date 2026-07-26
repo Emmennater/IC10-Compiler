@@ -1190,7 +1190,7 @@ class FrameLowerer {
       case "devicedef":
         this.processDeviceDeclaration(statement);
         break;
-      case "define":
+      case "definedef":
         this.processDefinition(statement);
         break;
       case "functioncall":
