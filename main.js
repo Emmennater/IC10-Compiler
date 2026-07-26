@@ -1,5 +1,5 @@
 import { getAST } from "./ast.ts";
-import { compile, CompileError } from "./index.ts";
+import { compile, CompileError } from "./compiler/index.ts";
 
 const DEFAULT_SOURCE = `
 let x = a

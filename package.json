@@ -7,6 +7,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:cases": "node tests/test.mjs",
     "generate-parser": "lezer-generator lezer/lang.grammar -o lezer/parser.ts"
   },
   "dependencies": {

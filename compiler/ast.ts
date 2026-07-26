@@ -1,4 +1,4 @@
-import { parser } from "./lezer/parser.ts";
+import { parser } from "../lezer/parser.ts";
 import type { TreeCursor } from "@lezer/common";
 
 /** One node of the parse tree produced by the language grammar. */
