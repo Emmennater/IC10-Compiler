@@ -3,14 +3,7 @@ import { compile, CompileError } from "./compiler/index.ts";
 import { getFormalAST } from "./compiler/formal-ast.ts";
 
 const DEFAULT_SOURCE = `
-let x = a
-if x > 1 then
-  b = 1
-elif x < -1 then
-  b = 2
-else
-  b = 3
-end
+let y = loadSlot(d0, 0, Quantity)
 `.substring(1);
 
 const sourceEl = document.getElementById("source");
@@ -25,7 +18,7 @@ function compileCurrentSource() {
   try {
     const ast = getAST(source);
     const formalAST = getFormalAST(ast);
-    console.log(formalAST);
+    // console.log(formalAST);
     outputEl.textContent = compile(ast, { removeLabels: true });
   } catch (e) {
     outputEl.classList.add("error");

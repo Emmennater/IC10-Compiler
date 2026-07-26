@@ -57,7 +57,8 @@ export class ErrorReporter {
 /** Node types that can appear where an expression is expected. */
 export const EXPRESSION_TYPES: ReadonlySet<string> = new Set([
   "Number", "Bool", "VariableName", "Device", "DeviceProperty", "DeviceChannelProperty",
-  "DeviceNameProperty", "Parens", "UnaryOp", "BinaryOp", "FunctionCall", "String",
+  "DeviceNameProperty", "Parens", "UnaryOp", "BinaryOp", "FunctionCall", "String", "Value",
+  "Integer",
 ]);
 
 /** Node types that can appear where a statement is expected. */

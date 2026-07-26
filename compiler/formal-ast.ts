@@ -418,42 +418,55 @@ function convertDeviceBase(node: SyntaxNode): Device | Identifier {
   return node.type === "Device" ? convertDevice(node) : convertIdentifier(node);
 }
 
-/**
- * `base . prop`, `base [ Integer ] . prop`, `base [ name ] . prop`. The
- * shapes are fixed by the grammar, so the parts are read positionally.
- */
-function convertProperty(node: SyntaxNode): DeviceProp | DeviceChannelProp | DeviceNameProp {
+function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | DeviceChannelProp | DeviceNameProp {
   const parts = kids(node);
-  const prop = convertIdentifier(parts[parts.length - 1]);
-  const device = convertDeviceBase(parts[0]);
 
-  if (node.type === "DeviceProperty") {
-    if (parts.length !== 3) fail("Malformed device property", node);
-    return { type: "deviceprop", ...rangeOf(node), device, prop };
-  }
+  if (parts.length === 1) {
+    return convertDeviceBase(parts[0]);
+  } else if (parts.length === 2) {
+    if (parts[1].type !== "PropertyAccessor") fail("Malformed value: device", node);
 
-  if (parts.length !== 6) fail("Malformed device property", node);
-  const index = parts[2];
-
-  if (node.type === "DeviceChannelProperty") {
     return {
-      type: "devicechannelprop",
       ...rangeOf(node),
-      device,
-      channel: { type: "constant", ...rangeOf(index), value: parseInt(index.text, 10) },
-      prop,
-    };
-  }
+      type: "deviceprop",
+      device: convertDeviceBase(parts[0]),
+      prop: convertIdentifier(kids(parts[1])[1]),
+    } as DeviceProp;
+  } else if (parts.length === 3) {
+    const indexer = kids(parts[1]).find(c => EXPRESSION_TYPES.has(c.type));
 
-  return {
-    type: "devicenameprop",
-    ...rangeOf(node),
-    device,
-    name: index.type === "String"
-      ? { type: "string", ...rangeOf(index), value: index.text }
-      : convertIdentifier(index),
-    prop,
-  };
+    if (parts[1].type !== "Indexing") fail("Malformed value: indexer", node);
+    if (parts[2].type !== "PropertyAccessor") fail("Malformed value: property accessor", node);
+    if (!indexer) fail("Malformed value: indexer", node);
+    if (!["Integer", "String", "VariableName"].includes(indexer.type))
+      fail("Malformed value: indexer type", node);
+    
+    const device = convertDeviceBase(parts[0]);
+    const prop = convertIdentifier(kids(parts[2])[1]);
+
+    
+    if (indexer.type === "Integer") {
+      return {
+        ...rangeOf(node),
+        type: "devicechannelprop",
+        device,
+        channel: { type: "constant", ...rangeOf(indexer), value: parseInt(indexer.text, 10) },
+        prop,
+      } as DeviceChannelProp;
+    } else {
+      return {
+        ...rangeOf(node),
+        type: "devicenameprop",
+        device,
+        name: indexer.type === "String"
+          ? { type: "string", ...rangeOf(indexer), value: indexer.text }
+          : convertIdentifier(indexer),
+        prop,
+      } as DeviceNameProp;
+    }
+  } else {
+    fail("Malformed value", node);
+  }
 }
 
 /** The children between the parentheses of a call or a definition. */
@@ -506,14 +519,8 @@ export function convertExpression(node: SyntaxNode): Expression {
       return { type: "bool", ...rangeOf(node), value: node.text === "true" };
     case "String":
       return { type: "string", ...rangeOf(node), value: node.text };
-    case "VariableName":
-      return convertIdentifier(node);
-    case "Device":
-      return convertDevice(node);
-    case "DeviceProperty":
-    case "DeviceChannelProperty":
-    case "DeviceNameProperty":
-      return convertProperty(node);
+    case "Value":
+      return convertValue(node);
     case "Parens": {
       // Grouping only exists to steer the parser; the tree already records it.
       const inner = kids(node).find(c => EXPRESSION_TYPES.has(c.type));
@@ -559,10 +566,10 @@ export function convertStatement(node: SyntaxNode): Statement {
       if (!opNode || !valueNode) fail("Malformed assignment", node);
 
       const targetNode = parts[0];
-      const target: AssignTarget = targetNode.type === "VariableName"
-        ? convertIdentifier(targetNode)
-        : convertProperty(targetNode);
+      const target = convertValue(targetNode);
       const value = convertExpression(valueNode);
+
+      if (target.type === "device") fail("Cannot assign to device", targetNode);
 
       if (opNode.type === "Assign") {
         return { type: "assignment", ...rangeOf(node), target, value };
