@@ -15,11 +15,7 @@ statement {
 
 Declaration {
   kw<"let"> VariableName
-  (Assign expression | BracketLeft Integer BracketRight (Assign ArrayInit)?)?
-}
-
-ArrayInit {
-  BracketLeft expression (Comma expression)* BracketRight
+  (Assign expression)?
 }
 
 DeviceDeclaration { kw<"device"> VariableName Assign Device }
@@ -68,7 +64,6 @@ expression { Number | Bool | VariableName | Device | DeviceProperty | DeviceChan
 VariableName { identifier }
 
 FunctionName { identifier }
-
 
 deviceBase { VariableName | Device }
 

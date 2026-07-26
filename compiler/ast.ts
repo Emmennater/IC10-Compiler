@@ -10,16 +10,6 @@ export type SyntaxNode = {
   children: SyntaxNode[];
 };
 
-export function emptySyntaxNode(): SyntaxNode {
-  return {
-    type: "generated",
-    text: "",
-    from: 0,
-    to: 0,
-    children: [],
-  } as SyntaxNode;
-}
-
 /** A compile-time diagnostic carrying the offending source range. */
 export class CompileError extends Error {
   readonly from: number;
