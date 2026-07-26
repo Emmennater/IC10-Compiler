@@ -168,19 +168,22 @@ function replaceUses(inst: Inst, victim: number, replacement: number): Inst {
       return { ...inst, args: inst.args.map(replace) };
     case "movev":
     case "storename":
-    case "poke":
       return { ...inst, src: replace(inst.src) };
+    case "poke":
+      return { ...inst, addr: replace(inst.addr), src: replace(inst.src) };
+    case "get":
+      return { ...inst, addr: replace(inst.addr) };
     // The rest carry no value operands (see operandsOf), so there is
     // nothing to rewrite. Listed explicitly so that adding an
     // operand-carrying instruction kind is a compile error here.
     case "loadname":
-    case "get":
     case "alias":
     case "definedef":
     case "label":
     case "jump":
     case "jal":
     case "ret":
+    case "reserve":
       return { ...inst };
     default:
       return assertNever(inst, "instruction in replaceUses");
@@ -207,6 +210,7 @@ function spill(
   ids: IdAllocator,
 ): Inst[] {
   const rewritten: Inst[] = [];
+  const addrOp = { kind: "const", text: addr.toString() } as Operand;
   for (const inst of program) {
     const defines = destOf(inst) === victim;
     const uses = usesOf(inst).includes(victim);
@@ -219,14 +223,14 @@ function spill(
     scratch.add(s);
     // Reload before the instruction; all operands of one instruction share it
     if (uses) {
-      rewritten.push({ op: "get", dest: s, addr, node: inst.node, id: ids.newInstId() });
+      rewritten.push({ op: "get", dest: s, addr: addrOp, node: inst.node, id: ids.newInstId() });
     }
     const copy = replaceUses(inst, victim, s);
     if (defines) setDest(copy, s);
     rewritten.push(copy);
     // Store the freshly defined value back to its stack slot
     if (defines) {
-      rewritten.push({ op: "poke", addr, src: { kind: "vreg", id: s }, node: inst.node, id: ids.newInstId() });
+      rewritten.push({ op: "poke", addr: addrOp, src: { kind: "vreg", id: s }, node: inst.node, id: ids.newInstId() });
     }
   }
   return rewritten;
@@ -270,13 +274,23 @@ function cleanupAfterAllocation(program: Inst[], registerOf: Map<number, number>
   }
 }
 
+/** After lists have been allocated, find the next free stack address */
+function freeStackAddress(program: Inst[]): number {
+  const reserveInsts = program.filter(inst => inst.op === "reserve");
+  let addr = STACK_TOP;
+  for (const inst of reserveInsts) {
+    addr -= inst.size;
+  }
+  return addr;
+}
+
 /**
  * Map every virtual register onto a physical register, sinking stores and
  * spilling to the stack when the program needs more registers than exist.
  */
 export function allocateRegisters(program: Inst[], context: AllocationContext): AllocationResult {
   const { registerOrder, ids, errors } = context;
-  let nextSpillAddr = STACK_TOP;
+  let nextSpillAddr = freeStackAddress(program);
   let storesHoisted = false;
   // vregs created by spilling; never re-spilled (freeing them relieves nothing)
   const scratch = new Set<number>();

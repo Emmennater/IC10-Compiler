@@ -3,7 +3,12 @@ import { compile, CompileError } from "./compiler/index.ts";
 import { getFormalAST } from "./compiler/formal-ast.ts";
 
 const DEFAULT_SOURCE = `
-let y = loadSlot(d0, 0, Quantity)
+let x[10]
+let i = 0
+while i < 10 do
+  x[i] = i
+  i += 1
+end
 `.substring(1);
 
 const sourceEl = document.getElementById("source");

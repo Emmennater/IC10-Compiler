@@ -58,8 +58,10 @@ export type Inst =
   | { id: number; op: "movev"; dest: number; src: Operand; node: SourceRange }
   | { id: number; op: "loadname"; dest: number; name: string; node: SourceRange }
   | { id: number; op: "storename"; name: string; src: Operand; node: SourceRange }
-  | { id: number; op: "get"; dest: number; addr: number; node: SourceRange }
-  | { id: number; op: "poke"; addr: number; src: Operand; node: SourceRange }
+  | { id: number; op: "get"; dest: number; addr: Operand; node: SourceRange }
+  | { id: number; op: "poke"; addr: Operand; src: Operand; node: SourceRange }
+  // Reserve space in the stack for lists
+  | { id: number; op: "reserve"; name: string; size: number; node: SourceRange }
   // A raw IC10 instruction (yield, sleep, l, s, ls, lb, user calls, ...).
   // With a dest it is a pure value producer (dest is the first operand);
   // without one it is a side effect and always survives.
@@ -135,6 +137,7 @@ export function destOf(inst: Inst): number | null {
     case "get":
     case "call":
       return inst.dest;
+    case "reserve":
     case "storename":
     case "poke":
     case "alias":
@@ -166,10 +169,13 @@ export function operandsOf(inst: Inst): Operand[] {
       return inst.args;
     case "movev":
     case "storename":
-    case "poke":
       return [inst.src];
-    case "loadname":
+    case "poke":
+      return [inst.addr, inst.src];
     case "get":
+      return [inst.addr];
+    case "reserve":
+    case "loadname":
     case "alias":
     case "definedef":
     case "label":

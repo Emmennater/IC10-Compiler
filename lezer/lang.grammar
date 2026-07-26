@@ -1,4 +1,4 @@
-@precedence { call, neg, times @left, plus @left, comp @left, and @left, or @left }
+@precedence { call, neg, list, times @left, plus @left, comp @left, and @left, or @left }
 
 kw<term> { @specialize[@name={term}]<identifier, term> }
 kw_<term> { @specialize<identifier, term> }
@@ -8,7 +8,7 @@ kw_<term> { @specialize<identifier, term> }
 block { statement* }
 
 statement {
-  Declaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
+  Declaration | ArrayDeclaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
   kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
   FunctionDef | Return | PreprocessorDirective
 }
@@ -16,6 +16,11 @@ statement {
 Declaration {
   kw<"let"> VariableName
   (Assign expression)?
+}
+
+ArrayDeclaration {
+  kw<"let"> VariableName !list BracketLeft Integer BracketRight
+  (Assign List)?
 }
 
 DeviceDeclaration { kw<"device"> VariableName Assign Device }
@@ -55,13 +60,13 @@ PreprocessorDirective { At DirectiveName }
 
 DirectiveName { kw_<"constexpr"> }
 
-expression { Number | Bool | Value | Parens | UnaryOp | BinaryOp | FunctionCall | String | List }
+expression { Number | Bool | Value | Parens | UnaryOp | BinaryOp | FunctionCall | String }
 
 VariableName { identifier }
 
 FunctionName { identifier }
 
-Indexing { BracketLeft (String | VariableName | Integer) BracketRight }
+Indexing { BracketLeft (expression) BracketRight }
 
 PropertyAccessor { Dot VariableName }
 

@@ -113,5 +113,7 @@ export function pressure(node: Expression, isKnownName: KnownNameLookup): number
       const b = pressure(node.right, isKnownName);
       return Math.max(a === b ? a + 1 : Math.max(a, b), 1);
     }
+    case "listindexing":
+      return pressure(node.index, isKnownName);
   }
 }

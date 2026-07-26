@@ -35,10 +35,10 @@ export function renderProgram(program: Inst[], registerOf: Map<number, number>):
         lines.push(`move ${inst.name} ${fmt(inst.src)}`);
         break;
       case "get":
-        lines.push(`get ${reg(inst.dest)} db ${inst.addr}`);
+        lines.push(`get ${reg(inst.dest)} db ${fmt(inst.addr)}`);
         break;
       case "poke":
-        lines.push(`poke ${inst.addr} ${fmt(inst.src)}`);
+        lines.push(`poke ${fmt(inst.addr)} ${fmt(inst.src)}`);
         break;
       case "call":
         lines.push(inst.dest === null

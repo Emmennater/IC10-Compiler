@@ -26,6 +26,7 @@
 import type { ErrorReporter } from "./syntax.ts";
 import {
   childrenOf,
+  type ArithmeticOpcode, type ArrayDeclaration as ListDeclaration, type ListIndexing,
   type Assignment, type BinaryOp, type Block, type ComparisonOp, type ComparisonOpcode,
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
   type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
@@ -40,6 +41,7 @@ import {
 } from "./ir.ts";
 import {
   AGGREGATORS, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OPCODE_ALIASES, SET_OPCODES,
+  STACK_TOP,
   applyArithmetic, compare,
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
@@ -76,6 +78,9 @@ type LoopTargets = { breakLabel: string; continueLabel: string };
 /** Where `return` delivers its value and jumps to. */
 type ReturnTarget = { home: number; endLabel: string };
 
+/** Mapping names to array declarations. */
+type ArrayTable = Map<string, { start: number; size: number; }>;
+
 /**
  * Services shared by every frame of one compilation: id sequences, label
  * naming, the function table, and the output region records. These are the
@@ -96,6 +101,7 @@ type Services = {
   readonly ifRegions: IfRegion[];
   readonly loopRegions: LoopRegion[];
   readonly constexpr: ConstexprEvaluator;
+  readonly arrayTable: ArrayTable;
 };
 
 /** The immutable context one frame lowers code in. */
@@ -139,6 +145,7 @@ export class Lowerer {
       ifRegions: [],
       loopRegions: [],
       constexpr: new ConstexprEvaluator(fnTable),
+      arrayTable: new Map(),
     };
   }
 
@@ -402,6 +409,32 @@ class FrameLowerer {
     return this.compileCallArg(index);
   }
 
+  private compileIndexing(node: ListIndexing): Operand {
+    const list = this.shared.arrayTable.get(node.list.name);
+    
+    if (!list) {
+      throw this.errors.error(`List ${node.list.name} is not defined`, node);
+    }
+    
+    const addr = this.compileBinaryOp({
+      from: node.from,
+      to: node.to,
+      type: "binaryop",
+      left: {
+        from: node.index.from,
+        to: node.index.to,
+        type: "constant",
+        value: list.start
+      } as Expression,
+      right: node.index,
+      opcode: "sub" as ArithmeticOpcode,
+    });
+
+    const dest = this.ids.newVreg();
+    this.emit({ op: "get", addr, dest, node });
+    return { kind: "vreg", id: dest };
+  }
+
   // ------------------------------ calls ---------------------------------
 
   /**
@@ -562,6 +595,8 @@ class FrameLowerer {
       case "comparisonop":
       case "logicalop":
         return this.compileBinaryOp(node);
+      case "listindexing":
+        return this.compileIndexing(node);
       default:
         return assertNever(node, "expression");
     }
@@ -1246,6 +1281,13 @@ class FrameLowerer {
         this.emit({ op: "jump", target: target.endLabel, node: statement });
         break;
       }
+      case "arraydeclaration": {
+        if (this.chain.depth > 1) {
+          throw this.errors.error("Arrays must be defined at the top level", statement);
+        }
+        this.processListDeclaration(statement);
+        break;
+      }
       default:
         assertNever(statement, "statement");
     }
@@ -1312,6 +1354,31 @@ class FrameLowerer {
         // Placeholder write: must leave the registers through a move
         this.emit({ op: "storename", name: target.name, src: value, node: statement });
       }
+      return;
+    }
+
+    if (target.type === "listindexing") {
+      const list = this.shared.arrayTable.get(target.list.name);
+
+      if (!list) {
+        this.shared.errors.error(`List ${target.list.name} is not defined`, target.list);
+        return;
+      }
+
+      const addr = this.compileBinaryOp({
+        from: target.from,
+        to: target.to,
+        type: "binaryop",
+        left: {
+          from: target.index.from,
+          to: target.index.to,
+          type: "constant",
+          value: list.start
+        } as Expression,
+        right: target.index,
+        opcode: "sub" as ArithmeticOpcode,
+      });
+      this.emit({ op: "poke", addr, src: value, node: statement });
       return;
     }
 
@@ -1390,5 +1457,27 @@ class FrameLowerer {
       return;
     }
     throw this.errors.error("define values must be constant", valueNode);
+  }
+
+  private processListDeclaration(statement: ListDeclaration): void {
+    const name = statement.name.name;
+    const size = statement.size.value;
+    const list = statement.list ? statement.list.elements : [];
+    
+    // Calculate the next available stack address
+    const arrayDecls = this.shared.arrayTable.values();
+    let baseAddr = STACK_TOP;
+    for (const decl of arrayDecls) {
+      baseAddr -= decl.size;
+    }
+
+    this.shared.arrayTable.set(name, { start: baseAddr, size });
+    this.emit({ op: "reserve", name, size, node: statement });
+
+    for (let i = 0; i < list.length; i++) {
+      const src = this.compileExpression(list[i]);
+      const addr = { kind: "const", text: String(baseAddr - i) } as Operand;
+      this.emit({ op: "poke", addr: addr, src, node: statement });
+    }
   }
 }

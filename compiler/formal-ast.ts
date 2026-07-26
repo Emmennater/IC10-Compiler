@@ -56,7 +56,8 @@ export type Statement =
   | DeviceDef
   | PreprocessorDir
   | FunctionDef
-  | FunctionCall;
+  | FunctionCall
+  | ArrayDeclaration;
 
 export type Expression =
   | Identifier
@@ -71,7 +72,8 @@ export type Expression =
   | ComparisonOp
   | LogicalOp
   | Device
-  | FunctionCall;
+  | FunctionCall
+  | ListIndexing;
 
 // Used for error handling when a switch case
 // consumes all types.
@@ -94,7 +96,7 @@ export type Declaration = Range & {
 };
 
 /** Anything the grammar accepts on the left of `=` or `+=`. */
-export type AssignTarget = Identifier | DeviceProp | DeviceChannelProp | DeviceNameProp;
+export type AssignTarget = Identifier | DeviceProp | DeviceChannelProp | DeviceNameProp | ListIndexing;
 
 // x = <expression>
 export type Assignment = Range & {
@@ -187,6 +189,20 @@ export type DeviceDef = Range & {
   device: Device;
 };
 
+// let <identifier> = [<expression>, ...]
+export type ArrayDeclaration = Range & {
+  type: "arraydeclaration";
+  name: Identifier;
+  size: Constant;
+  list?: List;
+}
+
+// [<expression>, ...]
+export type List = Range & {
+  type: "list";
+  elements: Expression[];
+};
+
 // @<identifier>
 export type PreprocessorDir = Range & {
   type: "preprocessordir";
@@ -249,6 +265,13 @@ export type DeviceNameProp = Range & {
   name: Identifier | StringExpr;
   prop: Identifier;
 };
+
+// <identifier>[<expression>]
+export type ListIndexing = Range & {
+  type: "listindexing";
+  list: Identifier;
+  index: Expression;
+}
 
 export type ArithmeticOpcode = "add" | "sub" | "mul" | "div" | "mod";
 
@@ -418,14 +441,28 @@ function convertDeviceBase(node: SyntaxNode): Device | Identifier {
   return node.type === "Device" ? convertDevice(node) : convertIdentifier(node);
 }
 
-function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | DeviceChannelProp | DeviceNameProp {
+function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | DeviceChannelProp | DeviceNameProp | ListIndexing {
   const parts = kids(node);
 
   if (parts.length === 1) {
     return convertDeviceBase(parts[0]);
   } else if (parts.length === 2) {
-    if (parts[1].type !== "PropertyAccessor") fail("Malformed value: device", node);
+    // Check for array access
+    if (parts[0].type === "VariableName" && parts[1].type === "Indexing") {
+      const identifier = convertIdentifier(parts[0]);
+      const indexer = kids(parts[1]).find(c => EXPRESSION_TYPES.has(c.type));
 
+      if (!indexer) fail("Malformed value: indexer", node);
+
+      return {
+        ...rangeOf(node),
+        type: "listindexing",
+        list: identifier,
+        index: convertExpression(indexer),
+      } as ListIndexing;
+    }
+
+    if (parts[1].type !== "PropertyAccessor") fail("Malformed value: device", node);
     return {
       ...rangeOf(node),
       type: "deviceprop",
@@ -438,14 +475,11 @@ function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | Devi
     if (parts[1].type !== "Indexing") fail("Malformed value: indexer", node);
     if (parts[2].type !== "PropertyAccessor") fail("Malformed value: property accessor", node);
     if (!indexer) fail("Malformed value: indexer", node);
-    if (!["Integer", "String", "VariableName"].includes(indexer.type))
-      fail("Malformed value: indexer type", node);
     
     const device = convertDeviceBase(parts[0]);
     const prop = convertIdentifier(kids(parts[2])[1]);
 
-    
-    if (indexer.type === "Integer") {
+    if (indexer.type === "Number") {
       return {
         ...rangeOf(node),
         type: "devicechannelprop",
@@ -460,7 +494,7 @@ function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | Devi
         device,
         name: indexer.type === "String"
           ? { type: "string", ...rangeOf(indexer), value: indexer.text }
-          : convertIdentifier(indexer),
+          : convertExpression(indexer),
         prop,
       } as DeviceNameProp;
     }
@@ -474,6 +508,14 @@ function betweenParens(node: SyntaxNode): SyntaxNode[] {
   const parts = kids(node);
   const open = parts.findIndex(c => c.type === "ParenLeft");
   const close = parts.findIndex(c => c.type === "ParenRight");
+  if (open < 0 || close < open) fail("Malformed parameter list", node);
+  return parts.slice(open + 1, close);
+}
+
+function betweenBrackets(node: SyntaxNode): SyntaxNode[] {
+  const parts = kids(node);
+  const open = parts.findIndex(c => c.type === "BracketLeft");
+  const close = parts.findIndex(c => c.type === "BracketRight");
   if (open < 0 || close < open) fail("Malformed parameter list", node);
   return parts.slice(open + 1, close);
 }
@@ -513,6 +555,7 @@ function convertBinary(node: SyntaxNode): BinaryOp | ComparisonOp | LogicalOp {
 
 export function convertExpression(node: SyntaxNode): Expression {
   switch (node.type) {
+    case "Integer":
     case "Number":
       return { type: "constant", ...rangeOf(node), value: parseFloat(node.text) };
     case "Bool":
@@ -692,6 +735,34 @@ export function convertStatement(node: SyntaxNode): Statement {
     case "FunctionCall":
       return convertCall(node);
 
+    case "ArrayDeclaration": {
+      const nameNode = parts.find(c => c.type === "VariableName");
+      const sizeNode = parts.find(c => c.type === "Integer");
+      if (!nameNode || !sizeNode) fail("Malformed array declaration", node);
+      const listNode = parts.find(c => c.type === "List");
+      if (listNode) {
+        const list = betweenBrackets(listNode).filter(c => EXPRESSION_TYPES.has(c.type)).map(convertExpression);
+        return {
+          ...rangeOf(node),
+          type: "arraydeclaration",
+          name: convertIdentifier(nameNode),
+          size: convertExpression(sizeNode),
+          list: {
+            type: "list",
+            from: listNode.from,
+            to: listNode.to,
+            elements: list,
+          } as List,
+        } as ArrayDeclaration;
+      } else {
+        return {
+          ...rangeOf(node),
+          type: "arraydeclaration",
+          name: convertIdentifier(nameNode),
+          size: convertExpression(sizeNode),
+        } as ArrayDeclaration;
+      }
+    }
     default:
       return fail(`Expected a statement, got ${node.type}`, node);
   }
@@ -751,5 +822,8 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "logicalop":
       return [node.left, node.right];
     case "unaryop": return [node.value];
+    case "arraydeclaration":
+      return [node.name, node.size, ...(node.list ? node.list.elements : [])];
+    case "listindexing": return [node.list, node.index];
   }
 }

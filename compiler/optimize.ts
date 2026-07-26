@@ -56,6 +56,9 @@ export function eliminateDeadCode(program: Inst[]): Inst[] {
       case "definedef":
         kept.push(inst); // decided below, once every use is known
         continue;
+      case "reserve":
+        kept.push(inst);
+        continue;
     }
     const dest = destOf(inst);
     if (!hasSideEffect(inst) && (dest === null || !live.has(dest))) continue;
