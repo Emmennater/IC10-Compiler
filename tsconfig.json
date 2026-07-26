@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
     "noUnusedLocals": true,
@@ -13,6 +14,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["*.ts", "lezer/*.ts", "tests/*.ts"],
+  "include": ["*.ts", "compiler/*.ts", "tests/*.ts"],
   "exclude": ["node_modules", "tests/original.ts", "tests/original-patched.ts"]
 }

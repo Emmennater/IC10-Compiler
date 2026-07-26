@@ -1,5 +1,6 @@
 import { getAST } from "./compiler/ast.ts";
 import { compile, CompileError } from "./compiler/index.ts";
+import { getFormalAST } from "./compiler/formal-ast.ts";
 
 const DEFAULT_SOURCE = `
 let x = a
@@ -23,6 +24,8 @@ function compileCurrentSource() {
   outputEl.classList.remove("error");
   try {
     const ast = getAST(source);
+    const formalAST = getFormalAST(ast);
+    console.log(formalAST);
     outputEl.textContent = compile(ast, { removeLabels: true });
   } catch (e) {
     outputEl.classList.add("error");
