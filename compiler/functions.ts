@@ -18,6 +18,10 @@ export type FnInfo = {
   paramVregs: number[] | null;
   retVreg: number | null;
   lowered: Inst[] | null;
+  // Whether every call site inlines this body because it is shorter than the
+  // call sequence would be. Decided once, from the lowered body's size, and
+  // cached here so all call sites agree; null until the first call measures.
+  alwaysInline: boolean | null;
   // Names referenced/assigned by the body and its callees (syntactic), cached
   varRefs: Set<string> | null;
   varWrites: Set<string> | null;

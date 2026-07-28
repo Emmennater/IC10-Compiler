@@ -12,6 +12,12 @@ import { compile } from "./index.ts";
 const ic10 = compile(getAST(source), { removeLabels: false });
 ```
 
+`config` also takes `registerOrder` (the physical registers the allocator may
+use, in preference order) and `inlineThreshold` (default 3): a function whose
+lowered body is shorter than that is inlined at every call site instead of
+being called, since the call sequence alone would cost more. A function with
+a single call site is always inlined; `inlineThreshold: 0` leaves only that.
+
 ## Literals
 
 | Spelling | Value | |
@@ -134,7 +140,7 @@ and nothing to restore. The JavaScript call stack is the only stack.
 
 Everything else is byte-identical. The numbering below is the project's
 stable reference for these fixes (see also CLAUDE.md, which carries the same
-numbering plus fix 8, an added optimization).
+numbering plus fixes 8 and 9, which are added optimizations).
 
 1. **`%` constant-folded as division** - `define m = 7 % 3` produced `2.333…`.
 2. **If-regions inside jal-lowered functions** were invisible to branch
@@ -172,7 +178,7 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
 
 1. **122 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
    AST, no `compile()`.
-2. **41 differential cases** (`tests/cases.test.ts`), each source program
+2. **42 differential cases** (`tests/cases.test.ts`), each source program
    compiled through both the pristine original and the refactor, covering
    folding, ifs, all three loop kinds, break/continue, inline and jal
    functions, non-leaf functions (`push ra`/`pop ra`), constexpr evaluation

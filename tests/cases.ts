@@ -26,7 +26,13 @@
 export type TestCase = {
   name: string;
   source: string | string[];
-  config?: { removeLabels?: boolean; registerOrder?: number[] };
+  /**
+   * `inlineThreshold` is refactor-only (the original has no such knob), so
+   * setting it means the case can no longer be compared against the oracle
+   * unless the value is 0 - which is exactly the original's behavior, and how
+   * the cases about jal-style calls keep a jal to compare.
+   */
+  config?: { removeLabels?: boolean; registerOrder?: number[]; inlineThreshold?: number };
   /** Substrings that must appear in the refactored output. */
   expect?: string[];
   /**
@@ -134,6 +140,9 @@ export const CASES: TestCase[] = [
   },
   {
     name: "function-jal-two-sites",
+    // Without this the one-instruction body inlines at both sites and there
+    // is no jal left to test; `function-inline-small-body` covers that.
+    config: { inlineThreshold: 0 },
     source: [
       "fn double(a)",
       "  return a * 2",
@@ -142,6 +151,27 @@ export const CASES: TestCase[] = [
       "d1.Setting = double(d2.Temperature)",
     ],
     expect: ["jal double", "j ra"],
+  },
+  {
+    // Fix 9: the same program at the default threshold. `double` lowers to
+    // one instruction, so both call sites inline it and the function, its
+    // label, the argument moves and the `ret` all disappear - and the
+    // constant argument folds all the way through.
+    name: "function-inline-small-body",
+    source: [
+      "fn double(a)",
+      "  return a * 2",
+      "end",
+      "d0.Setting = double(3)",
+      "d1.Setting = double(d2.Temperature)",
+    ],
+    expectOriginalDiff: true,
+    expected: [
+      "s d0 Setting 6",
+      "l r0 d2 Temperature",
+      "mul r0 r0 2",
+      "s d1 Setting r0",
+    ],
   },
   {
     name: "function-inline-single-site",
@@ -408,6 +438,8 @@ export const CASES: TestCase[] = [
   },
   {
     name: "non-leaf-function-push-pop-ra",
+    // Both bodies are small enough to inline; the point here is the ra save.
+    config: { inlineThreshold: 0 },
     source: [
       "fn inner(x)",
       "  return x + 1",
@@ -458,7 +490,9 @@ export const CASES: TestCase[] = [
     // substituted *any* token equal to a label name on *any* line, turning
     // `move r0 scale` into `move r0 <lineNumber>` - a silent miscompile.
     name: "remove-labels-name-collision",
-    config: { removeLabels: true },
+    // inlineThreshold 0: the collision only exists while `scale` is a label,
+    // and a one-instruction body would otherwise inline into both sites.
+    config: { removeLabels: true, inlineThreshold: 0 },
     source: [
       "fn scale(v)",
       "  return v * 2",

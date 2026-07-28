@@ -1482,6 +1482,7 @@ export const cases = {
   },
   "functions calling multiple functions (full order)": {
     order: FULL_ORDER,
+    inlineThreshold: 0, // this case is about the jal path, not about inlining
     source: [
       "fn baz(a, b)",
       "  return a > b",
@@ -1607,7 +1608,90 @@ export const cases = {
       "move y r2",
     ],
   },
+  "small function bodies inline at every call site": {
+    order: FULL_ORDER,
+    // twice() lowers to one instruction - less than the jal sequence that
+    // would call it - so both of its sites inline it and nothing is left to
+    // jump to. clampHigh is over the threshold and stays a real function.
+    source: [
+      "fn twice(v)",
+      "  return v * 2",
+      "end",
+      "fn clampHigh(v)",
+      "  if v > 100 then",
+      "    return 100",
+      "  end",
+      "  return v + 1",
+      "end",
+      "d0.Setting = twice(d0.Temperature)",
+      "d1.Setting = twice(d1.Temperature)",
+      "d2.Setting = clampHigh(d2.Temperature)",
+      "d3.Setting = clampHigh(d3.Temperature)",
+    ],
+    expected: [
+      "j ProgramStart",
+      "clampHigh:",
+      "ble r0 100 endif0",
+      "move r0 100",
+      "j endclampHigh",
+      "endif0:",
+      "add r0 r0 1",
+      "endclampHigh:",
+      "j ra",
+      "ProgramStart:",
+      "l r0 d0 Temperature",
+      "mul r0 r0 2",
+      "s d0 Setting r0",
+      "l r0 d1 Temperature",
+      "mul r0 r0 2",
+      "s d1 Setting r0",
+      "l r0 d2 Temperature",
+      "jal clampHigh",
+      "s d2 Setting r0",
+      "l r0 d3 Temperature",
+      "jal clampHigh",
+      "s d3 Setting r0",
+    ],
+  },
+  "inlining a small global writer folds its effect away": {
+    // bump() is one instruction, so both sites inline it - and once the body
+    // sits in the main program, count is an ordinary propagated constant
+    // again instead of a value that has to live in a home register.
+    source: [
+      "let count = 0",
+      "fn bump()",
+      "  count = count + 1",
+      "end",
+      "bump()",
+      "bump()",
+      "c = count",
+    ],
+    expected: "move c 2",
+  },
+  "a body that declares a name is never inlined": {
+    // The body is two instructions, but one of them names something once:
+    // inlining it at both sites would emit `alias pump d0` twice.
+    source: [
+      "fn setup()",
+      "  device pump = d0",
+      "  pump.On = 1",
+      "end",
+      "setup()",
+      "setup()",
+    ],
+    expected: [
+      "alias pump d0",
+      "j ProgramStart",
+      "setup:",
+      "s pump On 1",
+      "j ra",
+      "ProgramStart:",
+      "jal setup",
+      "jal setup",
+    ],
+  },
   "functions write global variables": {
+    inlineThreshold: 0, // this case is about the jal path, not about inlining
     source: [
       "let count = 0",
       "fn bump()",
@@ -1631,6 +1715,7 @@ export const cases = {
     ],
   },
   "functions read global variables": {
+    inlineThreshold: 0, // this case is about the jal path, not about inlining
     source: [
       "let target = 50",
       "fn alarmIf(v)",
@@ -1684,6 +1769,7 @@ export const cases = {
     ]
   },
   "constant offsets fold into a register a function body also reads": {
+    inlineThreshold: 0, // the fold has to survive a real call, not an inlined body
     // The two `+= 1` links write the same vreg, but the first one carries a
     // different register (the `move` of `a` that constant propagation
     // collapsed into it), so this is not the accumulating shape. What makes
@@ -2079,6 +2165,7 @@ export const cases = {
     ],
   },
   "globals initialize before loops that call functions": {
+    inlineThreshold: 0, // this case is about the jal path, not about inlining
     source: [
       "device housing = db",
       "let count = 0",
@@ -2138,9 +2225,17 @@ export const cases = {
 // Lines may be written as a string or an array of lines; join arrays.
 const joinLines = text => (typeof text === "string" || !text ? text : text.join("\n"));
 
-/** Compile one case spec, returning the output string or the CompileError. */
-export function runCase({ source, order }) {
-  const config = { removeLabels: false, registerOrder: order ?? REDUCED_ORDER };
+/**
+ * Compile one case spec, returning the output string or the CompileError.
+ * `inlineThreshold: 0` turns off small-body inlining, which is how the cases
+ * about jal-style calls keep having a jal to look at.
+ */
+export function runCase({ source, order, inlineThreshold }) {
+  const config = {
+    removeLabels: false,
+    registerOrder: order ?? REDUCED_ORDER,
+    ...(inlineThreshold === undefined ? {} : { inlineThreshold }),
+  };
   try {
     return compile(getAST(joinLines(source)), config);
   } catch (e) {

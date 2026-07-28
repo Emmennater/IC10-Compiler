@@ -26,7 +26,7 @@ import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
 import { getFormalAST } from "./formal-ast.ts";
 import { IdAllocator } from "./ir.ts";
 import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables.ts";
-import { Lowerer } from "./lowering.ts";
+import { INLINE_THRESHOLD, Lowerer } from "./lowering.ts";
 import { optimize } from "./optimize.ts";
 import { allocateRegisters } from "./regalloc.ts";
 import { renderProgram, resolveLabels } from "./render.ts";
@@ -39,11 +39,19 @@ export type Config = {
   removeLabels: boolean;
   /** Physical registers available to the allocator, in preference order. */
   registerOrder: number[];
+  /**
+   * A function whose lowered body is shorter than this is inlined at every
+   * call site instead of being called (see `INLINE_THRESHOLD` in
+   * lowering.ts). 0 disables the rule, leaving only the single-call-site
+   * inlining, which is unconditional.
+   */
+  inlineThreshold: number;
 };
 
 export const DEFAULT_CONFIG: Config = {
   removeLabels: false,
   registerOrder: [...VAR_REGISTER_ORDER],
+  inlineThreshold: INLINE_THRESHOLD,
 };
 
 /**
@@ -53,7 +61,10 @@ export const DEFAULT_CONFIG: Config = {
  * program. Throws a plain Error: this is a caller mistake, not a fault in
  * the compiled source, so it carries no source range.
  */
-function validateConfig(registerOrder: readonly number[]): void {
+function validateConfig(registerOrder: readonly number[], inlineThreshold: number): void {
+  if (!Number.isInteger(inlineThreshold) || inlineThreshold < 0) {
+    throw new Error(`inlineThreshold must be a non-negative integer; got ${inlineThreshold}`);
+  }
   if (registerOrder.length === 0) {
     throw new Error("registerOrder must name at least one register");
   }
@@ -73,7 +84,8 @@ function validateConfig(registerOrder: readonly number[]): void {
 export function compile(ast: SyntaxNode, config: Partial<Config> = {}): string {
   const removeLabels = config.removeLabels ?? DEFAULT_CONFIG.removeLabels;
   const registerOrder = config.registerOrder ?? DEFAULT_CONFIG.registerOrder;
-  validateConfig(registerOrder);
+  const inlineThreshold = config.inlineThreshold ?? DEFAULT_CONFIG.inlineThreshold;
+  validateConfig(registerOrder, inlineThreshold);
 
   const errors = new ErrorReporter(ast.text);
   // Reported here rather than left to getFormalAST so the message carries a
@@ -82,7 +94,7 @@ export function compile(ast: SyntaxNode, config: Partial<Config> = {}): string {
 
   const ids = new IdAllocator();
   const { program, ifRegions, loopRegions } =
-    new Lowerer(getFormalAST(ast), errors, ids).lower();
+    new Lowerer(getFormalAST(ast), errors, ids, inlineThreshold).lower();
   const optimized = optimize(program, ifRegions, loopRegions);
   const { program: allocated, registerOf } =
     allocateRegisters(optimized, { registerOrder, ids, errors, rootNode: ast });

@@ -48,7 +48,11 @@ describe("differential suite", () => {
       const refactoredAst = getAST(source);
 
       const o = runCompiler(original.compile, originalAst, config);
-      const r = runCompiler(refactored, refactoredAst, config);
+      // The inline threshold is refactor-only; the original never inlines a
+      // function with more than one call site, which is what 0 means here.
+      const r = runCompiler(
+        (ast, c) => refactored(ast, { ...c, inlineThreshold: testCase.config?.inlineThreshold }),
+        refactoredAst, config);
 
       if (testCase.expectOriginalDiff) {
         expect(r).not.toBe(o);

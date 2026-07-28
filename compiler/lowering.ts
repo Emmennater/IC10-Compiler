@@ -78,6 +78,15 @@ type LoopTargets = { breakLabel: string; continueLabel: string };
 /** Where `return` delivers its value and jumps to. */
 type ReturnTarget = { home: number; endLabel: string };
 
+/**
+ * A lowered function body shorter than this (real instructions, so labels
+ * and the closing `ret` do not count) is inlined at every call site instead
+ * of being called: the jal sequence alone - the argument moves, the `jal`,
+ * the result copy and the `ret` - already costs more than the body does.
+ * The default of the `inlineThreshold` config knob; 0 turns the rule off.
+ */
+export const INLINE_THRESHOLD = 3;
+
 /** Mapping names to array declarations. */
 type ArrayTable = Map<string, { start: number; size: number; }>;
 
@@ -102,6 +111,8 @@ type Services = {
   readonly loopRegions: LoopRegion[];
   readonly constexpr: ConstexprEvaluator;
   readonly arrayTable: ArrayTable;
+  /** Lowered body size under which a function is inlined at every call site. */
+  readonly inlineThreshold: number;
 };
 
 /** The immutable context one frame lowers code in. */
@@ -131,6 +142,7 @@ export class Lowerer {
     ast: Block,
     errors: ErrorReporter,
     ids: IdAllocator,
+    inlineThreshold: number = INLINE_THRESHOLD,
   ) {
     this.ast = ast;
     const fnTable: FnTable = new Map();
@@ -146,6 +158,7 @@ export class Lowerer {
       loopRegions: [],
       constexpr: new ConstexprEvaluator(fnTable),
       arrayTable: new Map(),
+      inlineThreshold,
     };
   }
 
@@ -202,6 +215,7 @@ export class Lowerer {
           paramVregs: null,
           retVreg: null,
           lowered: null,
+          alwaysInline: null,
           varRefs: null,
           varWrites: null,
         });
@@ -484,8 +498,11 @@ class FrameLowerer {
       }
     }
 
-    // A function with a single call site is inlined at that site
-    if (fn.callCount === 1) return this.inlineCall(fn, argNodes, node, wantValue);
+    // A function with a single call site is inlined at that site, and so is
+    // one whose body turns out to be shorter than calling it would be.
+    if (fn.callCount === 1 || this.bodyIsTiny(fn, node)) {
+      return this.inlineCall(fn, argNodes, node, wantValue);
+    }
 
     // jal-style call: arguments land in the function's parameter vregs
     const args = argNodes.map(a => this.compileExpression(a));
@@ -1187,7 +1204,37 @@ class FrameLowerer {
     }
   }
 
-  /** Inline a single-call-site function at its call site (textual inlining). */
+  /**
+   * Whether the function is short enough that every call site should inline
+   * it. The only honest measure of "short" is the lowered body, so the first
+   * call site lowers it - which the jal path was going to do anyway - and a
+   * body under `INLINE_THRESHOLD` throws that buffer away again so nothing
+   * emits it. The verdict is cached on the FnInfo, because the call sites
+   * must all agree: a body that is gone cannot be jumped to.
+   *
+   * A body that emits an `alias`, `define` or list reservation is never tiny
+   * no matter how short it is - those name something once, and inlining the
+   * body twice would declare the same name twice.
+   */
+  private bodyIsTiny(fn: FnInfo, node: Range): boolean {
+    if (fn.alwaysInline !== null) return fn.alwaysInline;
+    const threshold = this.shared.inlineThreshold;
+    if (threshold <= 0) return (fn.alwaysInline = false);
+    if (!fn.lowered) this.lowerFunction(fn, node);
+    const body = fn.lowered!.filter(inst => inst.op !== "label" && inst.op !== "ret");
+    const declares = body.some(
+      inst => inst.op === "alias" || inst.op === "definedef" || inst.op === "reserve");
+    fn.alwaysInline = !declares && body.length < threshold;
+    if (fn.alwaysInline) {
+      // Drop the jal body and the vregs its calling convention would use
+      fn.lowered = null;
+      fn.paramVregs = null;
+      fn.retVreg = null;
+    }
+    return fn.alwaysInline;
+  }
+
+  /** Inline a function at its call site (textual inlining). */
   private inlineCall(fn: FnInfo, argNodes: Expression[], node: Range, wantValue: boolean): Operand | null {
     this.checkNotRecursive(fn, node);
 
