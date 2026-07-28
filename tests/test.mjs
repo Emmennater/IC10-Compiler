@@ -877,8 +877,8 @@ export const cases = {
       "move a r0",
     ]
   },
-  // Every slot in the header is optional; only the two commas are required.
   "for loop (omitted update)": {
+    // Every slot in the header is optional; only the two commas are required.
     source: [
       "let i = 0",
       "for let j = 0, i < 10, do",
@@ -925,6 +925,24 @@ export const cases = {
       "add r0 r0 1",
       "j for0", // No condition means a constant-true one: only break exits
       "endfor0:",
+    ]
+  },
+  "for loop (trailing continue is a no-op)": {
+    // A trailing `continue` branches to the update label that already follows
+    // it, so the whole if is a no-op and goes - and the read of `a` with it.
+    // This is what makes removeJumpsToNext handle `branch`, not just `jump`.
+    source: [
+      "for let i = 0, i < 10, i += 1 do",
+      "  b = 1",
+      "  if a then continue end",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "move b 1",
+      "add r0 r0 1",
+      "blt r0 10 for0",
     ]
   },
   "for loop (empty header)": {
@@ -1010,9 +1028,9 @@ export const cases = {
     ],
     expected: "",
   },
-  // An empty body does not make an unconditional loop prunable: spinning
-  // forever is the behaviour, and the code after it is unreachable.
   "empty infinite while loops still spin": {
+    // An empty body does not make an unconditional loop prunable: spinning
+    // forever is the behaviour, and the code after it is unreachable.
     source: [
       "while 1 do end",
       "a = 1",
@@ -1030,6 +1048,53 @@ export const cases = {
     expected: [
       "for0:",
       "j for0",
+    ]
+  },
+  "empty loops that cannot change their condition still spin": {
+    // Nor does an empty body make a loop prunable when nothing inside it can
+    // ever change the condition - that loop does not terminate either.
+    source: [
+      "let i = a",
+      "for let j = 0, i < j, do end", // Empty body AND empty update
+      "a = i",
+    ],
+    expected: [
+      "move r0 a",
+      "bgez r0 endfor0",
+      "for0:",
+      "bltz r0 for0",
+      "endfor0:",
+      "move a r0",
+    ]
+  },
+  "device polling loops survive an empty body": {
+    // Re-reading a device is how an empty-bodied loop ends: it is a busy-wait,
+    // and the read has to stay inside the loop.
+    source: [
+      "d0.Setting = 1",
+      "while d0.Setting > 0 do end",
+      "b = 1",
+    ],
+    expected: [
+      "s d0 Setting 1",
+      "while0:",
+      "l r0 d0 Setting",
+      "bgtz r0 while0",
+      "move b 1",
+    ]
+  },
+  "a loop whose body dies is still a loop": {
+    source: [
+      "while a > 0 do",
+      "  let dead = b + 1",
+      "end",
+      "c = 1",
+    ],
+    expected: [
+      "while0:",
+      "move r0 a",
+      "bgtz r0 while0",
+      "move c 1",
     ]
   },
   "compacting repeat until loops (true condition)": {
@@ -1681,10 +1746,10 @@ export const cases = {
     source: "a = -5 % 3",
     expected: "move a 1",
   },
-  // Constant offset folding. Nothing here is foldable at lowering time:
-  // every chain starts from a placeholder read, so the shifts survive into
-  // the IR and it is the optimizer that has to merge them.
   "chained shifts on a placeholder collapse": {
+    // Constant offset folding. Nothing here is foldable at lowering time:
+    // every chain starts from a placeholder read, so the shifts survive into
+    // the IR and it is the optimizer that has to merge them.
     source: "b = a + 1 + 2 + 3",
     expected: "move r0 a\nadd r0 r0 6\nmove b r0",
   },
@@ -1696,10 +1761,10 @@ export const cases = {
     source: "b = a + 2 - 2",
     expected: "move r0 a\nmove b r0",
   },
-  // The loop counter shape: `i` is demoted to a home register, so both
-  // bumps write it and folding has to delete the first, not just redirect
-  // the second's read.
   "repeated bumps of a loop counter merge": {
+    // The loop counter shape: `i` is demoted to a home register, so both
+    // bumps write it and folding has to delete the first, not just redirect
+    // the second's read.
     source: [
       "let i = 0",
       "loop",
@@ -1718,15 +1783,15 @@ export const cases = {
       "j loop0",
     ],
   },
-  // An opcode that is not a shift breaks the chain: the reaching
-  // definition of the last add is the mul, so there is nothing to merge.
   "a multiply between two shifts blocks the merge": {
+    // An opcode that is not a shift breaks the chain: the reaching
+    // definition of the last add is the mul, so there is nothing to merge.
     source: "let x = a\nx += 2\nx *= 2\nx += 3\nb = x",
     expected: "move r0 a\nadd r0 r0 2\nmul r0 r0 2\nadd r0 r0 3\nmove b r0",
   },
-  // A const-first sub reflects the carrier instead of shifting it, so
-  // composing the two flips the shift's sign: 511 - (a + 1) is 510 - a.
   "a reflection absorbs the shift feeding it": {
+    // A const-first sub reflects the carrier instead of shifting it, so
+    // composing the two flips the shift's sign: 511 - (a + 1) is 510 - a.
     source: "let y = a + 1\nz = 511 - y",
     expected: "move r0 a\nsub r0 510 r0\nmove z r0",
   },
@@ -1738,14 +1803,14 @@ export const cases = {
     source: "let y = 511 - a\nz = 20 - y",
     expected: "move r0 a\nsub r0 r0 491\nmove z r0",
   },
-  // Unary minus lowers to `sub r0 0 r0`, a reflection like any other.
   "negating a shifted value composes": {
+    // Unary minus lowers to `sub r0 0 r0`, a reflection like any other.
     source: "b = -(a + 2)",
     expected: "move r0 a\nsub r0 -2 r0\nmove b r0",
   },
-  // Address arithmetic is `start + index`, so a constant index offset
-  // folds into the address computation itself.
   "list indexing folds a constant index offset": {
+    // Address arithmetic is `start + index`, so a constant index offset
+    // folds into the address computation itself.
     source: [
       "let arr[2] = [1, 2]",
       "let n = a",

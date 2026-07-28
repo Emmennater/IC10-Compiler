@@ -1034,11 +1034,15 @@ class FrameLowerer {
     // Set up conditional branch
     const { head, end } = this.labels.newWhile();
     const headLabelId = this.emit({ op: "label", name: head, node }).id;
+    // The region starts at the condition, not at the body: re-evaluating the
+    // condition is the only thing that can end a loop whose body is empty
+    // (a placeholder in it is re-read every iteration), so it counts as
+    // content. `repeat` has always spanned its condition this way.
+    const bodyFrom = this.ids.nextInstId;
     this.compileCondition(cond, end, false);
-    
+
     // Loop body
     this.statements.clearLoads();
-    const bodyFrom = this.ids.nextInstId;
     this.withContext({ loop: { breakLabel: end, continueLabel: head } }).processBlockScoped(body);
     const bodyTo = this.ids.nextInstId - 1;
     
@@ -1143,14 +1147,13 @@ class FrameLowerer {
     // has to exist even when there is no update statement to precede.
     this.emit({ op: "label", name: update, node });
     node.update && this.processStatement(node.update);
-    // The region is what the back jump REPEATS, which for a `for` is the
-    // body and the update both - `pruneEmptyLoops` reads it to decide the
-    // loop is an effect-free spin cycle. Stopping the range at the body
-    // would hide the update and prune a loop whose counter is observed
-    // afterwards. The condition is excluded for the same reason a while's
-    // is: evaluating it is not an effect of the loop.
-    const bodyTo = this.ids.nextInstId - 1;
     this.compileCondition(condition, head, true);
+    // The region is everything the back jump REPEATS - body, update and the
+    // condition test - because `pruneEmptyLoops` reads it to decide the loop
+    // is an effect-free spin cycle. Stopping short of the update would hide
+    // a counter that is observed afterwards; stopping short of the condition
+    // would hide the only thing that can ever end an otherwise empty loop.
+    const bodyTo = this.ids.nextInstId - 1;
     const last = this.lastEmitted();
     this.emit({ op: "label", name: end, node });
 

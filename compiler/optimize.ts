@@ -186,10 +186,17 @@ export function simplifyBranches(program: Inst[], ifRegions: IfRegion[]): Inst[]
 /**
  * Loops whose bodies emptied out are spin cycles with no effects: prune.
  *
- * Only loops that can leave on their own, though. An unconditional back jump
- * never falls out, so spinning forever IS the loop's observable behaviour -
- * deleting it would hand control to whatever follows, which the program can
- * never reach. `while 1 do end` has to compile to a spin, not to nothing.
+ * Deleting a loop claims it terminates, and nothing here proves that, so both
+ * guards below are about refusing to make that claim. An unconditional back
+ * jump never falls out, so the spin IS the observable behaviour and dropping
+ * it would run the code after the loop, which is unreachable. And the region
+ * spans the condition test, so a loop that can only end by re-reading a
+ * placeholder counts as having content.
+ *
+ * Between them a loop has to be both exitable and utterly empty to qualify,
+ * which no construct currently produces - `repeat` has never been prunable
+ * for exactly this reason. The pass is kept as the guard that stays correct
+ * if a future construct emits a loop shape that does.
  */
 export function pruneEmptyLoops(program: Inst[], loopRegions: LoopRegion[]): Inst[] | null {
   const present = new Map<number, Inst>();
@@ -232,7 +239,11 @@ export function removeJumpsToNext(program: Inst[]): Inst[] | null {
   const remove = new Set<number>();
   for (let i = 0; i < program.length; i++) {
     const inst = program[i];
-    if (inst.op !== "jump") continue;
+    // A conditional branch to the next label is a no-op too: both paths land
+    // in the same place. Dropping it discards the condition's reads, which
+    // the compiler already treats as effect-free everywhere else. A trailing
+    // `continue` is the shape that produces this - see the test of that name.
+    if (inst.op !== "jump" && inst.op !== "branch") continue;
     for (let j = i + 1; j < program.length; j++) {
       const next = program[j];
       if (next.op !== "label") break;

@@ -240,6 +240,9 @@ export type IfRegion = {
 export type LoopRegion = {
   headLabelId: number;
   backJumpId: number;
-  bodyFrom: number; // inclusive inst-id range between head label and back jump
+  // Inclusive inst-id range of everything the back jump repeats: the body,
+  // and also the condition test, whose re-evaluation is the only thing that
+  // can end a loop with an empty body.
+  bodyFrom: number;
   bodyTo: number;
 };
