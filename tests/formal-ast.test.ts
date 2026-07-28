@@ -48,6 +48,17 @@ describe("declarations and definitions", () => {
     const statement = only("let y") as Declaration;
     expect(statement.type).toBe("declaration");
     expect(statement.value).toBeUndefined();
+    expect(statement.constant).toBe(false);
+  });
+
+  test("const is a declaration flagged constant", () => {
+    const statement = only("const X = 1") as Declaration;
+    expect(statement).toMatchObject({
+      type: "declaration",
+      target: { type: "identifier", name: "X" },
+      value: { type: "constant", value: 1 },
+      constant: true,
+    });
   });
 
   test("define takes an arbitrary expression", () => {

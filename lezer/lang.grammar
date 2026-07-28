@@ -16,8 +16,12 @@ statement {
   FunctionDef | Return | PreprocessorDirective | ForExpr
 }
 
+// `const` differs from `let` only in that reassignment is an error; both
+// bind a compile-time name. (A `define` is the tunable one - it emits an
+// IC10 define line and is never folded, so a player can edit the value in
+// the chip.)
 Declaration {
-  kw<"let"> VariableName
+  (kw<"let"> | kw<"const">) VariableName
   (Assign expression)?
 }
 

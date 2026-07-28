@@ -1396,6 +1396,9 @@ class FrameLowerer {
   private processDeclaration(statement: Declaration): void {
     this.checkUndeclared(statement.target);
     const name = statement.target.name;
+    if (statement.constant && !statement.value) {
+      throw this.errors.error(`Constant ${name} must be assigned a value`, statement);
+    }
     // The initializer is evaluated before the name is bound, so a
     // same-named reference is still an IC10 passthrough.
     const value = statement.value ? this.compileExpression(statement.value) : null;
@@ -1406,7 +1409,7 @@ class FrameLowerer {
       state.home = this.ids.newVreg();
       if (value) this.emit({ op: "movev", dest: state.home, src: value, node: statement });
     }
-    this.chain.declare(name, { kind: "var", state });
+    this.chain.declare(name, { kind: "var", state, constant: statement.constant });
   }
 
   private processDeviceDeclaration(statement: DeviceDef): void {
@@ -1439,6 +1442,9 @@ class FrameLowerer {
       const symbol = this.chain.lookup(target.name);
       if (symbol && symbol.kind !== "var") {
         throw this.errors.error(`Cannot assign to ${target.name}`, target);
+      }
+      if (symbol?.constant) {
+        throw this.errors.error(`Cannot assign to constant ${target.name}`, target);
       }
       if (symbol) {
         this.assignVariable(symbol.state, value, statement);

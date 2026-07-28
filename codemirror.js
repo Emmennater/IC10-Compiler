@@ -123,7 +123,7 @@ const lang = LRLanguage.define({
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
         UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot": t.operator,
         "let if then elif else end loop while do repeat until break continue define device \
-        fn return At DirectiveName for": t.keyword,
+        fn return At DirectiveName for const": t.keyword,
         "Instruction FunctionName": t.function(t.variableName),
         "Number Integer": t.number,
         Bool: t.bool,

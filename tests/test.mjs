@@ -1809,6 +1809,41 @@ export const cases = {
       "endif1:",
     ],
   },
+  // const declarations
+  "a const folds exactly like a let": {
+    source: "const X = 10\nc = X + 1",
+    expected: "move c 11",
+  },
+  "a const is usable as an array size": {
+    source: "const SIZE = 2\nlet arr[SIZE] = [1, 2]\na = arr[0]",
+    expected: "poke 510 1\npoke 511 2\nget r0 db 510\nmove a r0",
+  },
+  "assigning to a const is an error": {
+    source: "const X = 1\nX = 2",
+    error: "Line 1: Cannot assign to constant X",
+  },
+  "compound-assigning to a const is an error": {
+    source: "const X = 1\nX += 2",
+    error: "Line 1: Cannot assign to constant X",
+  },
+  "a const declared in an outer scope cannot be assigned in a loop": {
+    source: "const X = 1\nloop\nX = X + 1\nend",
+    error: "Line 2: Cannot assign to constant X",
+  },
+  "a const must be given a value": {
+    source: "const X",
+    error: "Line 0: Constant X must be assigned a value",
+  },
+  "redeclaring an existing name as const is an error": {
+    source: "let x = 1\nconst x = 2",
+    error: "Line 1: x was already defined",
+  },
+  // A const is a compile-time name; a define is the tunable one - it emits an
+  // IC10 define line, is never folded, and so survives editing in the chip.
+  "a define is not folded the way a const is": {
+    source: "define X = 10\nconst Y = 10\nc = X + 1\nd = Y + 1",
+    expected: "define X 10\nadd r0 X 1\nmove c r0\nmove d 11",
+  },
   "based literals are accepted as an array size": {
     source: "let arr[0x2] = [1, 2]\na = arr[0]",
     expected: "poke 510 1\npoke 511 2\nget r0 db 510\nmove a r0",

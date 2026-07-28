@@ -89,11 +89,13 @@ export type Block = Range & {
 };
 
 // Statements
-// let <identifier> [= <expression>]
+// let <identifier> [= <expression>], or const <identifier> = <expression>
 export type Declaration = Range & {
   type: "declaration";
   target: Identifier;
   value?: Expression;
+  /** Declared with `const`: reassigning the name is an error. */
+  constant: boolean;
 };
 
 /** Anything the grammar accepts on the left of `=` or `+=`. */
@@ -690,6 +692,7 @@ export function convertStatement(node: SyntaxNode): Statement {
         ...rangeOf(node),
         target: convertIdentifier(nameNode),
         value: assign >= 0 ? convertExpression(parts[assign + 1]) : undefined,
+        constant: parts[0]?.type === "const",
       };
     }
 

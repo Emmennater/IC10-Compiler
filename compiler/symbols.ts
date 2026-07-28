@@ -28,7 +28,9 @@ export type VarState = {
 
 /** Anything a name can refer to. */
 export type Sym =
-  | { kind: "var"; state: VarState }
+  // `constant` marks a `const` binding: identical to `let` in every way
+  // except that assigning to it is an error. Absent means `let`.
+  | { kind: "var"; state: VarState; constant?: boolean }
   | { kind: "device"; pin: string }
   // `text` is what uses emit: the define's own name when a `define` line is
   // generated, or the substituted value for bare-identifier definitions
