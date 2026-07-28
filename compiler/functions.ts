@@ -29,6 +29,36 @@ export type FnInfo = {
 
 export type FnTable = Map<string, FnInfo>;
 
+/**
+ * Whether this instruction of `fn`'s lowered body exists only because the
+ * body is *called*, so an inlined copy of it would never emit the
+ * instruction at all:
+ *
+ *  - the entry and function-end labels, and the `ret` that closes the body;
+ *  - the moves that deliver a result into the shared return vreg, since an
+ *    inlined body hands its value back as an operand;
+ *  - the `ra` save a non-leaf body needs around its own calls, which an
+ *    inlined body does not (its caller's frame decides that for itself).
+ *
+ * Used to size a body for the inlining decision, so a miscount costs an
+ * instruction and can never miscompile - which is the licence for reading
+ * the `ra` save back out of the emitted push/pop rather than recording it.
+ */
+export function isCallOverhead(inst: Inst, fn: FnInfo): boolean {
+  switch (inst.op) {
+    case "label":
+    case "ret":
+      return true;
+    case "movev":
+      return inst.dest === fn.retVreg;
+    case "call":
+      return (inst.opcode === "push" || inst.opcode === "pop") &&
+        inst.args.length === 1 && inst.args[0].kind === "sym" && inst.args[0].text === "ra";
+    default:
+      return false;
+  }
+}
+
 /** The name a plain `x = ...` / `x += ...` assigns, or null for a device write. */
 function assignedName(node: FormalSyntaxNode): string | null {
   if (node.type !== "assignment" && node.type !== "compoundassignop") return null;

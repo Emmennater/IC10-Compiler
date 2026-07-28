@@ -45,7 +45,10 @@ import {
   applyBinary, applyBitwiseNot, compare,
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
-import { collectAssignedNames, countReturns, fnVarRefs, type FnInfo, type FnTable } from "./functions.ts";
+import {
+  collectAssignedNames, countReturns, fnVarRefs, isCallOverhead,
+  type FnInfo, type FnTable,
+} from "./functions.ts";
 import { ConstexprEvaluator } from "./constexpr.ts";
 import { LabelFactory } from "./labels.ts";
 import { StatementScope } from "./statement-scope.ts";
@@ -1212,6 +1215,15 @@ class FrameLowerer {
    * emits it. The verdict is cached on the FnInfo, because the call sites
    * must all agree: a body that is gone cannot be jumped to.
    *
+   * What is counted is what the *inlined copy* would cost, so `isCallOverhead`
+   * discounts the instructions that exist only because this is a call, and
+   * the trailing return's `j endfoo` is discounted on exactly the condition
+   * `inlineCall` uses to emit neither that jump nor the label it targets.
+   * Both matter: `return inner(y) * 2` lowers to add, mul, a move into the
+   * shared return vreg and that jump, and charging the copy for the two
+   * instructions it will never emit was enough to keep a two-instruction
+   * function out.
+   *
    * A body that emits an `alias`, `define` or list reservation is never tiny
    * no matter how short it is - those name something once, and inlining the
    * body twice would declare the same name twice.
@@ -1221,7 +1233,13 @@ class FrameLowerer {
     const threshold = this.shared.inlineThreshold;
     if (threshold <= 0) return (fn.alwaysInline = false);
     if (!fn.lowered) this.lowerFunction(fn, node);
-    const body = fn.lowered!.filter(inst => inst.op !== "label" && inst.op !== "ret");
+    // The shape inlineCall lowers with no end label and no jump to it.
+    const last = fn.body[fn.body.length - 1];
+    const trailingReturn = last?.type === "return" && countReturns(fn.body) === 1;
+    const endLabel = this.labels.functionEnd(fn.name);
+    const body = fn.lowered!.filter(inst =>
+      !isCallOverhead(inst, fn) &&
+      !(trailingReturn && inst.op === "jump" && inst.target === endLabel));
     const declares = body.some(
       inst => inst.op === "alias" || inst.op === "definedef" || inst.op === "reserve");
     fn.alwaysInline = !declares && body.length < threshold;

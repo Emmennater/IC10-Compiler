@@ -1653,6 +1653,32 @@ export const cases = {
       "s d3 Setting r0",
     ],
   },
+  "a body is sized as the inlined copy would be, not as the call is": {
+    // outer lowers to add, mul, a move into the shared return vreg and a
+    // jump to the function end. Counting those last two - neither of which
+    // an inlined copy emits - is what used to keep this two-instruction
+    // function behind a jal.
+    source: [
+      "fn inner(x)",
+      "  return x + 1",
+      "end",
+      "fn outer(y)",
+      "  return inner(y) * 2",
+      "end",
+      "d0.Setting = outer(d0.Temperature)",
+      "d1.Setting = outer(d1.Temperature)",
+    ],
+    expected: [
+      "l r0 d0 Temperature",
+      "add r0 r0 1",
+      "mul r0 r0 2",
+      "s d0 Setting r0",
+      "l r0 d1 Temperature",
+      "add r0 r0 1",
+      "mul r0 r0 2",
+      "s d1 Setting r0",
+    ],
+  },
   "inlining a small global writer folds its effect away": {
     // bump() is one instruction, so both sites inline it - and once the body
     // sits in the main program, count is an ordinary propagated constant

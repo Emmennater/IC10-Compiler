@@ -201,6 +201,10 @@ export const CASES: TestCase[] = [
   },
   {
     name: "function-writes-global",
+    // The home register is what a *call* needs; inlined, counter is an
+    // ordinary propagated constant - which `function-inline-writes-global`
+    // pins as the same program at the default threshold.
+    config: { inlineThreshold: 0 },
     source: [
       "let counter = 0",
       "fn bump()",
@@ -211,6 +215,27 @@ export const CASES: TestCase[] = [
       "d1.Setting = bump()",
     ],
     expect: ["jal bump"],
+  },
+  {
+    // Fix 9, and the reason the size counted is the size an inlined copy
+    // would have: bump's body is one `add` plus a move into the shared
+    // return vreg and a jump to the function end, neither of which an
+    // inlined copy emits. Inlined, both increments fold to their result.
+    name: "function-inline-writes-global",
+    source: [
+      "let counter = 0",
+      "fn bump()",
+      "  counter = counter + 1",
+      "  return counter",
+      "end",
+      "d0.Setting = bump()",
+      "d1.Setting = bump()",
+    ],
+    expectOriginalDiff: true,
+    expected: [
+      "s d0 Setting 1",
+      "s d1 Setting 2",
+    ],
   },
   {
     name: "constexpr-factorial",

@@ -14,9 +14,13 @@ const ic10 = compile(getAST(source), { removeLabels: false });
 
 `config` also takes `registerOrder` (the physical registers the allocator may
 use, in preference order) and `inlineThreshold` (default 3): a function whose
-lowered body is shorter than that is inlined at every call site instead of
-being called, since the call sequence alone would cost more. A function with
-a single call site is always inlined; `inlineThreshold: 0` leaves only that.
+body is shorter than that is inlined at every call site instead of being
+called, since the call sequence alone would cost more. The size counted is
+what the inlined copy would emit, which is less than the lowered body holds —
+the `ret`, the labels, the move into the shared return vreg and the `ra` save
+all belong to the call, not to the body. A function with a single call site is
+always inlined; `inlineThreshold: 0` leaves only that, which is what the
+original compiler did.
 
 ## Literals
 
@@ -178,7 +182,7 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
 
 1. **122 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
    AST, no `compile()`.
-2. **42 differential cases** (`tests/cases.test.ts`), each source program
+2. **43 differential cases** (`tests/cases.test.ts`), each source program
    compiled through both the pristine original and the refactor, covering
    folding, ifs, all three loop kinds, break/continue, inline and jal
    functions, non-leaf functions (`push ra`/`pop ra`), constexpr evaluation
