@@ -730,10 +730,14 @@ export const cases = {
     source: [
       "loop",
       "  let x = 0",
+      "  if a then break end",
       "end",
       "a = x",
     ],
-    expected: [ // Loop has no side effects and is pruned
+    expected: [
+      "loop0:",
+      "move r0 a",
+      "beqz r0 loop0",
       "move r0 x", // x is treated as a placeholder
       "move a r0",
     ]
@@ -773,6 +777,168 @@ export const cases = {
       "blt r0 r1 repeat0",
     ]
   },
+  "for loop": {
+    source: [
+      "for let i = 0, i < 10, i += 1 do",
+      "  yield",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "yield",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+    ]
+  },
+  "for loop (initializer used afterwards)": {
+    source: [
+      "for let i = 0, i < 10, i += 1 do",
+      "  yield",
+      "end",
+      "a = i",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "yield",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+      "move r0 i", // i is out of scope (is now a placeholder)
+      "move a r0",
+    ]
+  },
+  "for loop (with break)": {
+    source: [
+      "for let i = 0, i < 10, i += 1 do",
+      "  if i == a then break end",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "move r1 a",
+      "beq r0 r1 endfor0",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+      "endfor0:",
+    ]
+  },
+  "for loop (with continue)": {
+    source: [
+      "for let i = 0, i < 10, i += 1 do",
+      "  if i == a then continue end",
+      "  yield",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "move r1 a",
+      "beq r0 r1 updatefor0",
+      "yield",
+      "updatefor0:",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+    ]
+  },
+  "for loop (guard condition)": {
+    source: [
+      "let i = a",
+      "for let j = 0, i < j, i += 1 do",
+      "  yield",
+      "end",
+    ],
+    expected: [
+      "move r0 a",
+      // j is only ever declared, never reassigned, so it stays a constant
+      // and folds into both comparisons instead of taking a register.
+      "bgez r0 endfor0",
+      "for0:",
+      "yield",
+      "add r0 r0 1",
+      "bltz r0 for0",
+      "endfor0:",
+    ]
+  },
+  "for loop (empty body)": {
+    source: [
+      "let i = a",
+      "for let j = 0, i < j, i += 1 do end",
+      "a = i",
+    ],
+    expected: [
+      "move r0 a",
+      "bgez r0 endfor0",
+      "for0:",
+      "add r0 r0 1",
+      "bltz r0 for0",
+      "endfor0:",
+      "move a r0",
+    ]
+  },
+  // Every slot in the header is optional; only the two commas are required.
+  "for loop (omitted update)": {
+    source: [
+      "let i = 0",
+      "for let j = 0, i < 10, do",
+      "  i += 1",
+      "end",
+      "a = i",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+      "move a r0",
+    ]
+  },
+  "for loop (omitted init)": {
+    source: [
+      "let i = 0",
+      "for , i < 10, i += 1 do",
+      "  yield",
+      "end",
+      "a = i",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "yield",
+      "add r0 r0 1",
+      "blt r0 10 for0",
+      "move a r0",
+    ]
+  },
+  "for loop (omitted condition)": {
+    source: [
+      "for let i = 0, , i += 1 do",
+      "  if i == a then break end",
+      "end",
+    ],
+    expected: [
+      "move r0 0",
+      "for0:",
+      "move r1 a",
+      "beq r0 r1 endfor0",
+      "add r0 r0 1",
+      "j for0", // No condition means a constant-true one: only break exits
+      "endfor0:",
+    ]
+  },
+  "for loop (empty header)": {
+    source: [
+      "for , , do",
+      "  yield",
+      "end",
+    ],
+    expected: [
+      "for0:",
+      "yield",
+      "j for0",
+    ]
+  },
   "compacting while loops (true condition)": {
     source: [
       "while 1 > 0 do",
@@ -788,6 +954,53 @@ export const cases = {
       "j while0",
     ]
   },
+  "compacting while loops (true variable condition)": {
+    source: [
+      "let a = 1",
+      "while a do",
+      "  yield",
+      "  a = b",
+      "end",
+    ],
+    expected: [
+      "move r0 1",
+      "while0:",
+      "beqz r0 endwhile0",
+      "yield",
+      "move r0 b",
+      "j while0",
+      "endwhile0:",
+    ]
+  },
+  "while condition forgets a constant an enclosing construct left behind": {
+    // Fix 5, in the case the plain `while-counter` case misses: the `if`
+    // already demoted `i`, so its home vreg is set on entry to the while and
+    // the assignment `i = 0` keeps the constant alongside it. Folding the
+    // condition against that entry constant deletes the whole loop.
+    source: [
+      "let i = 0",
+      "if a then",
+      "  i = 0",
+      "  while i < 3 do",
+      "    i += 1",
+      "  end",
+      "end",
+      "c = i",
+    ],
+    expected: [
+      "move r0 0",
+      "move r1 a",
+      "beqz r1 endif0",
+      "move r0 0",
+      "while0:",
+      "bge r0 3 endwhile0",
+      "add r0 r0 1",
+      "j while0",
+      "endwhile0:",
+      "endif0:",
+      "move c r0",
+    ],
+  },
   "compacting while loops (false condition)": {
     source: [
       "while a && false do",
@@ -796,6 +1009,28 @@ export const cases = {
       "end",
     ],
     expected: "",
+  },
+  // An empty body does not make an unconditional loop prunable: spinning
+  // forever is the behaviour, and the code after it is unreachable.
+  "empty infinite while loops still spin": {
+    source: [
+      "while 1 do end",
+      "a = 1",
+    ],
+    expected: [
+      "while0:",
+      "j while0",
+    ]
+  },
+  "empty infinite for loops still spin": {
+    source: [
+      "for , , do end",
+      "a = 1",
+    ],
+    expected: [
+      "for0:",
+      "j for0",
+    ]
   },
   "compacting repeat until loops (true condition)": {
     source: [

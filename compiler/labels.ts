@@ -38,6 +38,7 @@ export class LabelFactory {
   private loopCount = 0;
   private whileCount = 0;
   private repeatCount = 0;
+  private forCount = 0;
   private shortCircuitCount = 0;
   private inlineCount = 0;
 
@@ -58,6 +59,11 @@ export class LabelFactory {
   newRepeat(): { head: string; until: string; end: string } {
     const i = this.repeatCount++;
     return { head: `repeat${i}`, until: `until${i}`, end: `endrepeat${i}` };
+  }
+
+  newFor(): { head: string; update: string; end: string } {
+    const i = this.forCount++;
+    return { head: `for${i}`, update: `updatefor${i}`, end: `endfor${i}` };
   }
 
   /** Join point for a short-circuited `&&` / `||` in a condition. */

@@ -10,7 +10,7 @@ block { statement* }
 statement {
   Declaration | ArrayDeclaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
   kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
-  FunctionDef | Return | PreprocessorDirective
+  FunctionDef | Return | PreprocessorDirective | ForExpr
 }
 
 Declaration {
@@ -42,6 +42,8 @@ LoopExpr { kw<"loop"> block kw<"end"> }
 WhileExpr { kw<"while"> expression kw<"do"> block kw<"end"> }
 
 RepeatUntilExpr { kw<"repeat"> block kw<"until"> expression }
+
+ForExpr { kw<"for"> statement? Comma expression? Comma statement? kw<"do"> block kw<"end"> }
 
 Instruction { kw_<"yield"> | kw_<"sleep"> expression }
 

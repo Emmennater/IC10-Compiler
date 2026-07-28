@@ -31,7 +31,7 @@ import {
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
   type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
   type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
-  type StringExpr, type UnaryOp, type While,
+  type StringExpr, type UnaryOp, type While, type For,
 } from "./formal-ast.ts";
 import {
   assertNever,
@@ -757,14 +757,15 @@ class FrameLowerer {
       }
       return;
     }
-
     // Truthiness of an arbitrary value: compare against zero
     const value = this.compileExpression(node);
+    
     if (value.kind === "const") {
       const truthy = parseFloat(value.text) !== 0;
       if (truthy === jumpWhen) this.emit({ op: "jump", target, node });
       return;
     }
+    
     this.emit({ op: "branch", opcode: jumpWhen ? "bnez" : "beqz", args: [value], target, node });
   }
 
@@ -1017,30 +1018,31 @@ class FrameLowerer {
     const entryFolded = this.fold(cond);
     if (entryFolded && parseFloat(entryFolded.text) === 0) return; // never runs
 
+    // Ensure that all used variables are now assigned to virtual registers
     const body = node.body.statements;
     const assigned = new Set<string>();
     collectAssignedNames(body, this.fnTable, assigned);
     const demoted = this.demoteVariables(assigned, node);
-
-    const { head, end } = this.labels.newWhile();
-
+    // The condition is lowered at the loop head, before the body, so the
+    // steady-state forget that `lowerLoopBody` does for loop/repeat has to
+    // happen here instead - folding it against entry constants is fix 5.
     for (const d of demoted) {
       d.state.value = { kind: "vreg", id: d.state.home! };
       d.state.maybe = d.entryMaybe || d.entryValue === null;
     }
-    // Steady-state fold, after demoted variables forgot their entry
-    // constants: the branch at the head runs on every iteration, so a
-    // variable the body assigns must not decide it with its entry value
-    // (`let i = 0; while i < 10 do i += 1` is not an infinite loop).
-    const folded = this.fold(cond);
+
+    // Set up conditional branch
+    const { head, end } = this.labels.newWhile();
     const headLabelId = this.emit({ op: "label", name: head, node }).id;
-    if (!folded || parseFloat(folded.text) === 0) {
-      this.compileCondition(cond, end, false);
-      this.statements.clearLoads();
-    }
+    this.compileCondition(cond, end, false);
+    
+    // Loop body
+    this.statements.clearLoads();
     const bodyFrom = this.ids.nextInstId;
     this.withContext({ loop: { breakLabel: end, continueLabel: head } }).processBlockScoped(body);
     const bodyTo = this.ids.nextInstId - 1;
+    
+    // Loop back
     const backJumpId = this.emit({ op: "jump", target: head, node }).id;
     this.emit({ op: "label", name: end, node });
     this.shared.loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
@@ -1084,6 +1086,81 @@ class FrameLowerer {
     // The body always runs at least once
     this.finalizeDemoted(demoted, d =>
       (d.entryValue !== null && !d.entryMaybe) || (!d.state.maybe && d.state.value !== null));
+  }
+
+  private processFor(node: For): void {
+    /**
+     * A `let` in the init is scoped to the loop, so the whole construct - init,
+     * condition, body and update - is lowered one scope down.
+     */
+    this.withContext({ chain: this.chain.child() }).lowerFor(node);
+  }
+
+  private lowerFor(node: For): void {
+    const condition = node.condition || { type: "constant", value: 1 } as Constant;
+
+    // The init runs first, and before anything looks the loop's names up: it
+    // may DECLARE the loop variable, and a variable that is not in scope yet
+    // cannot be demoted below - it would keep its initializer constant all
+    // the way into the steady-state condition fold, which is fix 5 wearing
+    // for's clothes (`for let i = 0, i < 10, i += 1` folded `i < 10` against
+    // i = 0 and emitted an infinite loop with no exit branch).
+    node.init && this.processStatement(node.init);
+
+    // Entry-state fold: sound only for the guard, because the guard is
+    // decided once, after the init and before any body assignment can move
+    // a variable. A constant-false guard skips the loop; a constant-true one
+    // needs no branch.
+    const entryFolded = this.fold(condition);
+    if (entryFolded && parseFloat(entryFolded.text) === 0) return; // Never runs
+
+    // Ensure that all used variables are now assigned to virtual registers
+    const body = node.body.statements;
+    const init = node.init ? [node.init] : [];
+    const updt = node.update ? [node.update] : [];
+    const assigned = new Set<string>();
+    collectAssignedNames([...body, ...init, ...updt], this.fnTable, assigned);
+    const demoted = this.demoteVariables(assigned, node);
+    // Steady state: the condition is re-evaluated on the back edge, where a
+    // demoted variable holds whatever the body and update last wrote.
+    for (const d of demoted) {
+      d.state.value = { kind: "vreg", id: d.state.home! };
+      d.state.maybe = d.entryMaybe || d.entryValue === null;
+    }
+
+    const { head, update, end } = this.labels.newFor();
+
+    // Guard condition (the entry fold already proved a folded one true)
+    if (!entryFolded) this.compileCondition(condition, end, false);
+    const headLabelId = this.emit({ op: "label", name: head, node }).id;
+    
+    // Loop body
+    this.statements.clearLoads();
+    const bodyFrom = this.ids.nextInstId;
+    this.withContext({ loop: { breakLabel: end, continueLabel: update } }).processBlockScoped(body);
+
+    // Loop back. `continue` targets the update, not the head, so the label
+    // has to exist even when there is no update statement to precede.
+    this.emit({ op: "label", name: update, node });
+    node.update && this.processStatement(node.update);
+    // The region is what the back jump REPEATS, which for a `for` is the
+    // body and the update both - `pruneEmptyLoops` reads it to decide the
+    // loop is an effect-free spin cycle. Stopping the range at the body
+    // would hide the update and prune a loop whose counter is observed
+    // afterwards. The condition is excluded for the same reason a while's
+    // is: evaluating it is not an effect of the loop.
+    const bodyTo = this.ids.nextInstId - 1;
+    this.compileCondition(condition, head, true);
+    const last = this.lastEmitted();
+    this.emit({ op: "label", name: end, node });
+
+    if (last) {
+      const backJumpId = last.id;
+      this.shared.loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+    }
+
+    // The body may run zero times
+    this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
   }
 
   // ---------------------------- functions -------------------------------
@@ -1238,6 +1315,9 @@ class FrameLowerer {
         break;
       case "repeat":
         this.processRepeat(statement);
+        break;
+      case "for":
+        this.processFor(statement);
         break;
       case "break": {
         if (!this.cx.loop) throw this.errors.error("break outside of a loop", statement);

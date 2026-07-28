@@ -66,4 +66,6 @@ export const
   _return = 64,
   PreprocessorDirective = 65,
   At = 66,
-  DirectiveName = 67
+  DirectiveName = 67,
+  ForExpr = 68,
+  _for = 69

@@ -183,14 +183,24 @@ export function simplifyBranches(program: Inst[], ifRegions: IfRegion[]): Inst[]
   return program.filter(inst => !remove.has(inst.id));
 }
 
-/** Loops whose bodies emptied out are spin cycles with no effects: prune. */
+/**
+ * Loops whose bodies emptied out are spin cycles with no effects: prune.
+ *
+ * Only loops that can leave on their own, though. An unconditional back jump
+ * never falls out, so spinning forever IS the loop's observable behaviour -
+ * deleting it would hand control to whatever follows, which the program can
+ * never reach. `while 1 do end` has to compile to a spin, not to nothing.
+ */
 export function pruneEmptyLoops(program: Inst[], loopRegions: LoopRegion[]): Inst[] | null {
   const present = new Map<number, Inst>();
   for (const inst of program) present.set(inst.id, inst);
   const remove = new Set<number>();
 
   for (const region of loopRegions) {
-    if (!present.has(region.backJumpId)) continue;
+    const backJump = present.get(region.backJumpId);
+    // Anything that is not a conditional branch is left alone: either it is
+    // an unconditional back jump, or it is not a back jump we understand.
+    if (!backJump || backJump.op !== "branch") continue;
     const content = program.some(inst =>
       inst.id >= region.bodyFrom && inst.id <= region.bodyTo && inst.op !== "label");
     if (!content) remove.add(region.backJumpId);

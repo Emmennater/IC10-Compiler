@@ -47,6 +47,7 @@ export type Statement =
   | Loop
   | While
   | Repeat
+  | For
   | Break
   | Continue
   | Yield
@@ -145,6 +146,15 @@ export type While = Range & {
 export type Repeat = Range & {
   type: "repeat";
   until: Expression;
+  body: Block;
+};
+
+// for <statement>, <expression>, <statement> do <block> end
+export type For = Range & {
+  type: "for";
+  init?: Statement;
+  condition?: Expression;
+  update?: Statement;
   body: Block;
 };
 
@@ -520,6 +530,14 @@ function betweenBrackets(node: SyntaxNode): SyntaxNode[] {
   return parts.slice(open + 1, close);
 }
 
+function betweenKeywords(node: SyntaxNode, open: string, close: string): SyntaxNode[] {
+  const parts = kids(node);
+  const openIdx = parts.findIndex(c => c.text === open);
+  const closeIdx = parts.slice(openIdx + 1).findIndex(c => c.text === close) + openIdx + 1;
+  if (openIdx < 0 || closeIdx < 0) fail("Malformed parameter list", node);
+  return parts.slice(openIdx + 1, closeIdx);
+}
+
 function convertCall(node: SyntaxNode): FunctionCall {
   const nameNode = kids(node).find(c => c.type === "FunctionName");
   if (!nameNode) fail("Malformed function call", node);
@@ -661,6 +679,29 @@ export function convertStatement(node: SyntaxNode): Statement {
         body: convertBlock(node, "repeat", "until"),
       };
 
+    case "ForExpr": {
+      // `for <init>? , <cond>? , <update>? do`: the grammar makes all three
+      // slots optional and only the two commas mandatory, so split the head
+      // on its commas rather than walking fixed positions - an omitted
+      // trailing slot just ends the list early.
+      const slots: (SyntaxNode | undefined)[] = [undefined, undefined, undefined];
+      let slot = 0;
+      for (const part of betweenKeywords(node, "for", "do")) {
+        if (part.type === "Comma") slot++;
+        else if (slot > 2) fail("Malformed for header", node);
+        else slots[slot] = part;
+      }
+      const [init, cond, updt] = slots;
+      return {
+        ...rangeOf(node),
+        type: "for",
+        init: init ? convertStatement(init) : undefined,
+        condition: cond ? convertExpression(cond) : undefined,
+        update: updt ? convertStatement(updt) : undefined,
+        body: convertBlock(node, "do", "end"),
+      }
+    }
+
     case "break":
       return { type: "break", ...rangeOf(node) };
 
@@ -763,6 +804,7 @@ export function convertStatement(node: SyntaxNode): Statement {
         } as ArrayDeclaration;
       }
     }
+    
     default:
       return fail(`Expected a statement, got ${node.type}`, node);
   }
@@ -798,6 +840,7 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "loop": return [node.body];
     case "while": return [node.condition, node.body];
     case "repeat": return [node.body, node.until];
+    case "for": return [node.init, node.condition, node.update, node.body].filter(c => c !== undefined);
     case "break":
     case "continue":
     case "yield":
