@@ -1,6 +1,6 @@
 /**
  * Parses source text with the frozen pre-Value grammar (lang-original.grammar),
- * producing the exact node shapes tests/original.ts and tests/original-patched.ts
+ * producing the exact node shapes tests/original.ts
  * expect (DeviceProperty/DeviceChannelProperty/DeviceNameProperty, bare
  * VariableName/Device in expression position). Mirrors compiler/ast.ts's
  * getAST, but against the separately generated parser-original.js so the

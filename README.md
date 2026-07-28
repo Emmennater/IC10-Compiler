@@ -87,8 +87,9 @@ and nothing to restore. The JavaScript call stack is the only stack.
 
 ## Behavioral fixes vs the original
 
-Everything else is byte-identical. Numbering matches the `// PATCH n:`
-markers in `tests/original-patched.ts`.
+Everything else is byte-identical. The numbering below is the project's
+stable reference for these fixes (see also CLAUDE.md, which carries the same
+numbering plus fix 8, an added optimization).
 
 1. **`%` constant-folded as division** - `define m = 7 % 3` produced `2.333…`.
 2. **If-regions inside jal-lowered functions** were invisible to branch
@@ -109,7 +110,9 @@ markers in `tests/original-patched.ts`.
    inlined bodies keep the caller's loop on purpose (macro semantics).
 
 Each fix is pinned by a differential case flagged `expectOriginalDiff`, so
-the harness distinguishes it from a regression.
+the harness distinguishes it from a regression. Because the original
+disagrees with those cases by design, each also pins its full output with an
+`expected` golden - the runner requires one on every flagged case.
 
 ## Verification
 
@@ -120,22 +123,25 @@ npm test            # vitest: units + differential + language-case suites
 npm run dev          # vite dev server for the manual test-string page (index.html/main.js)
 ```
 
-`npm test` runs three suites:
+`npm test` runs four suites:
 
-1. **96 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
+1. **100 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
    AST, no `compile()`.
-2. **37 differential cases** (`tests/cases.test.ts`), each hand-built AST
-   compiled through the pristine original, the patched original, and the
-   refactor, covering folding, ifs, all three loop kinds, break/continue,
-   inline and jal functions, non-leaf functions (`push ra`/`pop ra`),
-   constexpr evaluation and bail-out, aggregators, define chains, aliases,
-   slot ops, spilling under 2- and 3-register orders, label resolution and
-   name collision, and error paths. Asserts refactor ≡ patched original
-   byte-for-byte, refactor ≡ pristine original except on flagged cases, and
-   that expected substrings appear.
+2. **41 differential cases** (`tests/cases.test.ts`), each source program
+   compiled through both the pristine original and the refactor, covering
+   folding, ifs, all three loop kinds, break/continue, inline and jal
+   functions, non-leaf functions (`push ra`/`pop ra`), constexpr evaluation
+   and bail-out, aggregators, define chains, aliases, slot ops, spilling
+   under 2- and 3-register orders, label resolution and name collision, and
+   error paths. Asserts refactor ≡ pristine original byte-for-byte except on
+   cases flagged `expectOriginalDiff`, which instead pin their full output
+   with `expected`, and that expected substrings appear.
 3. **Language-level regression cases** (`tests/language-cases.test.mjs`,
    wrapping `tests/test.mjs`) - real source strings through the actual
    parser (`ast.ts` + `lezer/lang.grammar`) and `compile()`, asserting exact
    output or error message. Also runnable standalone: `node tests/test.mjs`.
+4. **32 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
+   through `getAST` → `getFormalAST`, asserting the typed tree's shape. It
+   touches no part of the compile pipeline.
 
 r16 (sp) and r17 (ra) are reserved for stack and function support.

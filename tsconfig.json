@@ -15,5 +15,5 @@
     "noEmit": true
   },
   "include": ["*.ts", "compiler/*.ts", "tests/*.ts"],
-  "exclude": ["node_modules", "tests/original.ts", "tests/original-patched.ts"]
+  "exclude": ["node_modules", "tests/original.ts"]
 }

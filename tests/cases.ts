@@ -1,18 +1,26 @@
 /**
  * Differential test programs. Each case is source text, parsed once with the
- * frozen pre-Value grammar (ast-original.ts) for the pristine/patched
- * original compilers and once with the current grammar (compiler/ast.ts) for
- * the refactor, then all three outputs are compared. Source text is the only
+ * frozen pre-Value grammar (ast-original.ts) for the pristine original
+ * compiler and once with the current grammar (compiler/ast.ts) for the
+ * refactor, then the two outputs are compared. Source text is the only
  * shared representation between the two grammars; original.ts hardcodes the
  * old node shapes (DeviceProperty et al.) and can never learn the new one, so
  * this is the only way to keep the byte-for-byte oracle comparison alive
  * across a grammar change without hand-authoring two trees per case.
  *
  * Invariants checked by the runner:
- *  - refactored output === patched-original output, byte for byte, always
- *  - refactored output === pristine-original output, except for cases
- *    flagged expectOriginalDiff (which exercise a documented bug fix)
+ *  - refactored output === pristine-original output, byte for byte, except
+ *    for cases flagged expectOriginalDiff (which exercise a documented fix)
+ *  - every flagged case instead pins its full output with `expected`, since
+ *    the oracle cannot ratify a deliberate divergence from it
  *  - every string in `expect` appears in the refactored output
+ *
+ * There used to be a third run against original-patched.ts - the original
+ * carrying only the documented fixes - so that flagged cases still had a
+ * byte-for-byte oracle. Keeping a 2,800-line legacy compiler in step with
+ * every new fix and optimization cost more than it caught, so the flagged
+ * cases now carry goldens (captured from that patched compiler before it was
+ * removed) and the pristine original stays as the oracle everywhere else.
  */
 
 export type TestCase = {
@@ -21,6 +29,12 @@ export type TestCase = {
   config?: { removeLabels?: boolean; registerOrder?: number[] };
   /** Substrings that must appear in the refactored output. */
   expect?: string[];
+  /**
+   * Exact expected output, asserted byte for byte. Required on every case
+   * flagged expectOriginalDiff: the pristine original disagrees there by
+   * design, so this golden is that case's only full-output check.
+   */
+  expected?: string | string[];
   /** True when the pristine original is expected to differ (documented fix). */
   expectOriginalDiff?: boolean;
 };
@@ -79,6 +93,16 @@ export const CASES: TestCase[] = [
     // The exit branch must exist: the original folded `i < 10` with i's
     // entry constant 0 and emitted an infinite loop with no store.
     expect: ["yield", "bge r0 10", "s d0 Setting r0"],
+    expected: [
+      "move r0 0",
+      "while0:",
+      "bge r0 10 endwhile0",
+      "add r0 r0 1",
+      "yield",
+      "j while0",
+      "endwhile0:",
+      "s d0 Setting r0",
+    ],
     expectOriginalDiff: true,
   },
   {
@@ -198,6 +222,7 @@ export const CASES: TestCase[] = [
       "d0.Setting = m",
     ],
     expect: ["define m 1"],
+    expected: ["define m 1", "s d0 Setting m"],
     expectOriginalDiff: true, // original folds 7 % 3 as 7 / 3
   },
   {
@@ -237,6 +262,27 @@ export const CASES: TestCase[] = [
       "d3.Setting = i",
     ],
     expect: ["poke", "get"],
+    expected: [
+      "l r0 d0 Temperature",
+      "l r1 d1 Temperature",
+      "poke 510 r1",
+      "move r1 0",
+      "poke 511 r1",
+      "while0:",
+      "get r1 db 511",
+      "bge r1 100 endwhile0",
+      "get r1 db 511",
+      "add r1 r1 1",
+      "poke 511 r1",
+      "get r1 db 510",
+      "add r1 r0 r1",
+      "s d2 Setting r1",
+      "yield",
+      "j while0",
+      "endwhile0:",
+      "get r0 db 511",
+      "s d3 Setting r0",
+    ],
     expectOriginalDiff: true,
   },
   {
@@ -266,6 +312,19 @@ export const CASES: TestCase[] = [
     // unary minus - a shift feeding a reflection, so the two compose into
     // `sub r0 -2 r0`. The pristine original keeps both.
     expect: ["sub r0 -2 r0"],
+    expected: [
+      "move r0 p",
+      "sub r0 0 r0",
+      "move o1 r0",
+      "move r0 p",
+      "seqz r0 r0",
+      "move o2 r0",
+      "move r0 p",
+      "move o3 r0",
+      "move r0 p",
+      "sub r0 -2 r0",
+      "move o4 r0",
+    ],
     expectOriginalDiff: true,
   },
   {
@@ -313,6 +372,17 @@ export const CASES: TestCase[] = [
       "d1.Setting = total",
     ],
     expect: ["sleep 1", "bge"],
+    expected: [
+      "move r0 0",
+      "while0:",
+      "bge r0 100 endwhile0",
+      "l r1 d0 Temperature",
+      "add r0 r0 r1",
+      "sleep 1",
+      "j while0",
+      "endwhile0:",
+      "s d1 Setting r0",
+    ],
     expectOriginalDiff: true, // original folded the while condition to true
   },
   {
@@ -325,6 +395,14 @@ export const CASES: TestCase[] = [
       "  yield",
       "end",
       "d0.Setting = i",
+    ],
+    expected: [
+      "move r0 0",
+      "bge r0 10 5",
+      "add r0 r0 1",
+      "yield",
+      "j 1",
+      "s d0 Setting r0",
     ],
     expectOriginalDiff: true, // same while-condition fix as while-counter
   },
@@ -390,6 +468,19 @@ export const CASES: TestCase[] = [
       "d2.Setting = scale",
     ],
     expect: ["move r0 scale"],
+    expected: [
+      "j 3",
+      "mul r0 r0 2",
+      "j ra",
+      "move r0 1",
+      "jal 1",
+      "s d0 Setting r0",
+      "move r0 2",
+      "jal 1",
+      "s d1 Setting r0",
+      "move r0 scale",
+      "s d2 Setting r0",
+    ],
     expectOriginalDiff: true,
   },
   {
@@ -412,6 +503,7 @@ export const CASES: TestCase[] = [
       "end",
     ],
     expect: ["ERROR: Line 2: break outside of a loop"],
+    expected: "ERROR: Line 2: break outside of a loop",
     expectOriginalDiff: true,
   },
   {
@@ -477,6 +569,7 @@ export const CASES: TestCase[] = [
       "b = x",
     ],
     expect: ["move r0 a", "add r0 r0 2", "move b r0"],
+    expected: ["move r0 a", "add r0 r0 2", "move b r0"],
     expectOriginalDiff: true,
   },
   {
@@ -489,6 +582,7 @@ export const CASES: TestCase[] = [
       "b = x - 2 + 3",
     ],
     expect: ["move r0 a", "add r0 r0 1", "move b r0"],
+    expected: ["move r0 a", "add r0 r0 1", "move b r0"],
     expectOriginalDiff: true,
   },
   {
@@ -501,6 +595,7 @@ export const CASES: TestCase[] = [
       "z = 511 - y",
     ],
     expect: ["move r0 a", "sub r0 510 r0", "move z r0"],
+    expected: ["move r0 a", "sub r0 510 r0", "move z r0"],
     expectOriginalDiff: true,
   },
   {
@@ -512,6 +607,7 @@ export const CASES: TestCase[] = [
       "b = x + 2 - 2",
     ],
     expect: ["move r0 a", "move b r0"],
+    expected: ["move r0 a", "move b r0"],
     expectOriginalDiff: true,
   },
 ];

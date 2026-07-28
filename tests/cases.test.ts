@@ -1,14 +1,14 @@
 /**
  * Differential suite: each source program in cases.ts is parsed with the
- * frozen pre-Value grammar for the pristine original and the bug-patched
- * original, and with the current grammar for the refactor, then all three
- * outputs are asserted against each other. See cases.ts for why two parsers
- * are needed and the invariants checked.
+ * frozen pre-Value grammar for the pristine original and with the current
+ * grammar for the refactor, then the two outputs are asserted against each
+ * other. Cases that diverge from the original by design pin their full
+ * output with `expected` instead. See cases.ts for why two parsers are
+ * needed and the invariants checked.
  */
 
 import { describe, it, expect } from "vitest";
 import * as original from "./original.ts";
-import * as patched from "./original-patched.ts";
 import { compile as refactored } from "../compiler/index.ts";
 import { getOriginalAST } from "./ast-original.ts";
 import { getAST } from "../compiler/ast.ts";
@@ -36,8 +36,8 @@ const joinLines = (source: string | string[]): string =>
 describe("differential suite", () => {
   for (const testCase of CASES) {
     it(testCase.name, () => {
-      // original.compile/patched.compile want every field; merge with the
-      // same defaults each of the three compilers falls back to internally.
+      // original.compile wants every field; merge with the same defaults
+      // both compilers fall back to internally.
       const config: FullConfig = {
         removeLabels: testCase.config?.removeLabels ?? false,
         registerOrder: testCase.config?.registerOrder ?? [...VAR_REGISTER_ORDER],
@@ -48,15 +48,23 @@ describe("differential suite", () => {
       const refactoredAst = getAST(source);
 
       const o = runCompiler(original.compile, originalAst, config);
-      const p = runCompiler(patched.compile, originalAst, config);
       const r = runCompiler(refactored, refactoredAst, config);
-
-      expect(r).toBe(p);
 
       if (testCase.expectOriginalDiff) {
         expect(r).not.toBe(o);
+        // The oracle disagrees here by design, so it cannot check the rest of
+        // the output. A golden is mandatory or the case degrades to the
+        // substring list the moment someone flags it.
+        expect(
+          testCase.expected,
+          "a case flagged expectOriginalDiff must pin its full output with `expected`",
+        ).toBeDefined();
       } else {
         expect(r).toBe(o);
+      }
+
+      if (testCase.expected !== undefined) {
+        expect(r).toBe(joinLines(testCase.expected));
       }
 
       for (const substring of testCase.expect ?? []) {
