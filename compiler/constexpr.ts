@@ -8,7 +8,7 @@
  */
 
 import type { Expression, Statement } from "./formal-ast.ts";
-import { applyArithmetic, compare } from "./tables.ts";
+import { applyBinary, applyBitwiseNot, compare } from "./tables.ts";
 import type { FnInfo, FnTable } from "./functions.ts";
 
 /** The body did something that only exists at runtime, or ran too long. */
@@ -99,10 +99,11 @@ export class ConstexprEvaluator {
         const value = this.evalNode(node.value, envs);
         if (node.opcode === "neg") return -value;
         if (node.opcode === "not") return value === 0 ? 1 : 0;
+        if (node.opcode === "bitnot") return applyBitwiseNot(value);
         return value;
       }
       case "binaryop":
-        return applyArithmetic(node.opcode, this.evalNode(node.left, envs), this.evalNode(node.right, envs));
+        return applyBinary(node.opcode, this.evalNode(node.left, envs), this.evalNode(node.right, envs));
       case "comparisonop":
         return compare(node.opcode, this.evalNode(node.left, envs), this.evalNode(node.right, envs)) ? 1 : 0;
       case "logicalop": {
@@ -147,7 +148,7 @@ export class ConstexprEvaluator {
         const env = this.findEnv(envs, target.name);
         if (!env) throw new BailSignal(); // placeholder write = side effect
         const result = statement.type === "compoundassignop"
-          ? applyArithmetic(statement.opcode, env.get(target.name)!, this.evalNode(statement.right, envs))
+          ? applyBinary(statement.opcode, env.get(target.name)!, this.evalNode(statement.right, envs))
           : this.evalNode(statement.value, envs);
         env.set(target.name, result);
         return;

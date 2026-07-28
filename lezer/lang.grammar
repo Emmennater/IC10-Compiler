@@ -1,4 +1,7 @@
-@precedence { call, neg, list, times @left, plus @left, comp @left, and @left, or @left }
+@precedence {
+  call, neg, list, times @left, plus @left, shift @left, comp @left,
+  bitand @left, bitxor @left, bitor @left, and @left, or @left
+}
 
 kw<term> { @specialize[@name={term}]<identifier, term> }
 kw_<term> { @specialize<identifier, term> }
@@ -80,12 +83,16 @@ Value {
 
 Parens { ParenLeft expression ParenRight }
 
-UnaryOp { !neg (AddOp | Not) expression }
+UnaryOp { !neg (AddOp | Not | BitNot) expression }
 
 BinaryOp {
   expression !times MulOp expression |
   expression !plus AddOp expression |
+  expression !shift ShiftOp expression |
   expression !comp CompareOp expression |
+  expression !bitand BitAnd expression |
+  expression !bitxor BitXor expression |
+  expression !bitor BitOr expression |
   expression !and LogicAnd expression |
   expression !or LogicOr expression
 }
@@ -104,11 +111,21 @@ List { BracketLeft (expression (Comma expression)*)? BracketRight }
   MulOp { "*" | "/" | "%" }
   AddOp { "+" | "-" }
   Not { "!" }
+  BitNot { "~" }
+  // ">>" is the arithmetic (sign-preserving) shift and ">>>" the logical
+  // one, as in JavaScript; they resolve to IC10's `sra` and `srl`.
+  ShiftOp { "<<" | ">>" | ">>>" }
   CompareOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+  BitAnd { "&" }
+  BitXor { "^" }
+  BitOr { "|" }
   LogicAnd { "&&" }
   LogicOr { "||" }
   Assign { "=" }
-  CompoundAssignOp { "+=" | "-=" | "*=" | "/=" | "%=" }
+  CompoundAssignOp {
+    "+=" | "-=" | "*=" | "/=" | "%=" |
+    "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>="
+  }
   ParenLeft { "(" }
   ParenRight { ")" }
   BracketLeft { "[" }

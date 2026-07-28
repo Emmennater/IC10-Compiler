@@ -1746,6 +1746,149 @@ export const cases = {
     source: "a = -5 % 3",
     expected: "move a 1",
   },
+  // Bitwise operators
+  "bitwise operators lower to their IC10 instructions": {
+    source: [
+      "b = a & 3",
+      "c = a | 3",
+      "d = a ^ 3",
+      "e = ~a",
+    ],
+    expected: [
+      "move r0 a", "and r0 r0 3", "move b r0",
+      "move r0 a", "or r0 r0 3", "move c r0",
+      "move r0 a", "xor r0 r0 3", "move d r0",
+      "move r0 a", "not r0 r0", "move e r0",
+    ],
+  },
+  "the two right shifts pick different IC10 instructions": {
+    // `>>` keeps the sign bit and `>>>` does not, as in JavaScript; the chip
+    // spells that difference `sra` versus `srl`.
+    source: [
+      "b = a << 2",
+      "c = a >> 2",
+      "d = a >>> 2",
+    ],
+    expected: [
+      "move r0 a", "sll r0 r0 2", "move b r0",
+      "move r0 a", "sra r0 r0 2", "move c r0",
+      "move r0 a", "srl r0 r0 2", "move d r0",
+    ],
+  },
+  "compound bitwise assignment (all)": {
+    source: [
+      "let x = a",
+      "x &= 12",
+      "x |= 1",
+      "x ^= 5",
+      "x <<= 2",
+      "x >>= 1",
+      "x >>>= 1",
+      "b = x",
+    ],
+    expected: [
+      "move r0 a",
+      "and r0 r0 12",
+      "or r0 r0 1",
+      "xor r0 r0 5",
+      "sll r0 r0 2",
+      "sra r0 r0 1",
+      "srl r0 r0 1",
+      "move b r0",
+    ],
+  },
+  "compound bitwise assignment on a placeholder reads then writes back": {
+    source: "b &= 3",
+    expected: "move r0 b\nand r0 r0 3\nmove b r0",
+  },
+  "bitwise folding is 64 bits wide": {
+    // JavaScript's own `1 << 40` is 256: folding goes through BigInt so that
+    // what the compiler computes is what the chip would.
+    source: "a = 1 << 40",
+    expected: "move a 1099511627776",
+  },
+  "bitwise folding truncates its operands to integers": {
+    source: "a = 5.9 & 3",
+    expected: "move a 1",
+  },
+  "an arithmetic shift keeps the sign bit": {
+    source: "a = -8 >> 2",
+    expected: "move a -2",
+  },
+  "a logical shift fills with zeroes": {
+    source: "a = -8 >>> 60",
+    expected: "move a 15",
+  },
+  "bitwise not of zero is every bit set": {
+    source: "a = ~0",
+    expected: "move a -1",
+  },
+  "~ and ! are different operators": {
+    // `!` is logical: seqz, an exact 0/1. `~` is the chip's `not`, every bit
+    // flipped.
+    source: "b = !a\nc = ~a",
+    expected: "move r0 a\nseqz r0 r0\nmove b r0\nmove r0 a\nnot r0 r0\nmove c r0",
+  },
+  "& and && are different operators": {
+    // Both emit `and`, but `&&` coerces each side to 0/1 first, so `2 && 4`
+    // is 1 where `2 & 4` is 0.
+    source: "b = a & c\nd = a && c",
+    expected: [
+      "move r0 a", "move r1 c", "and r0 r0 r1", "move b r0",
+      "move r0 a", "move r1 c", "snez r0 r0", "snez r1 r1", "and r0 r0 r1", "move d r0",
+    ],
+  },
+  "bitwise precedence follows C": {
+    // & binds tighter than ^, which binds tighter than |:
+    // 1 | ((2 & 3) ^ 4) is 1 | (2 ^ 4) is 1 | 6.
+    source: "a = 1 | 2 & 3 ^ 4",
+    expected: "move a 7",
+  },
+  "shifts bind tighter than comparison": {
+    source: "b = 1 << 3 > a",
+    expected: "move r0 a\nsgt r0 8 r0\nmove b r0",
+  },
+  "a bitmask in a condition branches on the masked value": {
+    source: "if a & 4 then b = 1 end",
+    expected: "move r0 a\nand r0 r0 4\nbeqz r0 endif0\nmove b 1\nendif0:",
+  },
+  "a bitwise op ends a constant offset chain": {
+    // Constant offset folding only merges add/sub links, so the `and` between
+    // these two shifts blocks the merge that would otherwise happen.
+    source: "let x = a + 1\nx &= 255\nx += 2\nb = x",
+    expected: "move r0 a\nadd r0 r0 1\nand r0 r0 255\nadd r0 r0 2\nmove b r0",
+  },
+  "constexpr functions evaluate bitwise operators": {
+    source: [
+      "@constexpr",
+      "fn mask(n)",
+      "  let m = 0",
+      "  let i = 0",
+      "  while i < n do",
+      "    m = m << 1 | 1",
+      "    i += 1",
+      "  end",
+      "  return m",
+      "end",
+      "b = mask(5)",
+    ],
+    expected: "move b 31",
+  },
+  "a stack instruction is a shifted hash or'd with an opcode": {
+    // The idiom the game's own docs use for programming a Logic Sorter.
+    source: [
+      "device sorter = d0",
+      "let hash = a",
+      "put(sorter, 0, hash << 8 | 1)",
+    ],
+    expected: [
+      "alias sorter d0",
+      "move r0 a",
+      "sll r0 r0 8",
+      "or r0 r0 1",
+      "put sorter 0 r0",
+    ],
+  },
   "chained shifts on a placeholder collapse": {
     // Constant offset folding. Nothing here is foldable at lowering time:
     // every chain starts from a placeholder read, so the shifts survive into

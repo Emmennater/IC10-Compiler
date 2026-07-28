@@ -12,6 +12,28 @@ import { compile } from "./index.ts";
 const ic10 = compile(getAST(source), { removeLabels: false });
 ```
 
+## Operators
+
+| Operator | IC10 | Notes |
+| --- | --- | --- |
+| `+` `-` `*` `/` `%` | `add` `sub` `mul` `div` `mod` | `%` is a true modulo: the result takes the divisor's sign |
+| `==` `!=` `<` `<=` `>` `>=` | `seq` `sne` `slt` `sle` `sgt` `sge` | fuse into a branch when used as a condition |
+| `&&` `\|\|` `!` | `and` `or` `seqz` | logical: each side is coerced to an exact 0/1 first |
+| `&` `\|` `^` `~` | `and` `or` `xor` `not` | bitwise, over the 64-bit two's complement word |
+| `<<` `>>` `>>>` | `sll` `sra` `srl` | `>>` keeps the sign bit, `>>>` shifts zeroes into it |
+
+Every binary operator has a compound form (`&=`, `<<=`, `>>>=`, …).
+Precedence follows C, so `a & 1 == 1` is `a & (1 == 1)`; parenthesize when
+that is not what you meant.
+
+The bitwise operators truncate their operands toward zero and wrap at 64
+bits, exactly as the chip does — so `5.9 & 3` is `1`, `~0` is `-1`, and
+`1 << 40` is `1099511627776`, not the 256 that JavaScript's own 32-bit
+operators would give. Compile-time folding goes through the same
+implementation as codegen (`tables.ts`), so a folded result cannot disagree
+with a computed one. `nor` and `sla` have no operator; call them directly
+(`nor(a, b)`), which works for any opcode.
+
 ## Architecture
 
 The design goal is that each file reads on its own. Leaf libraries know
@@ -48,7 +70,7 @@ flowchart TB
 | --- | --- |
 | `ast.ts` | The real parser: `getAST(text)` over the generated Lezer parser; defines `SyntaxNode`/`CompileError` |
 | `syntax.ts` | `ErrorReporter` and all AST navigation (re-exports `SyntaxNode`/`CompileError` from `ast.ts`) |
-| `tables.ts` | Opcode tables and the one shared implementation of IC10 arithmetic/comparison semantics |
+| `tables.ts` | Opcode tables and the one shared implementation of IC10 arithmetic/bitwise/comparison semantics |
 | `ir.ts` | Operands, the `Inst` union, id allocation, pure accessors, `assertNever` |
 | `folding.ts` | Constant folding and Sethi–Ullman pressure estimation - pure functions over the tree |
 | `labels.ts` | Every generated label name |
@@ -125,7 +147,7 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
 
 `npm test` runs four suites:
 
-1. **100 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
+1. **122 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
    AST, no `compile()`.
 2. **41 differential cases** (`tests/cases.test.ts`), each source program
    compiled through both the pristine original and the refactor, covering
@@ -140,7 +162,7 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
    wrapping `tests/test.mjs`) - real source strings through the actual
    parser (`ast.ts` + `lezer/lang.grammar`) and `compile()`, asserting exact
    output or error message. Also runnable standalone: `node tests/test.mjs`.
-4. **32 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
+4. **38 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
    through `getAST` → `getFormalAST`, asserting the typed tree's shape. It
    touches no part of the compile pipeline.
 

@@ -1,6 +1,6 @@
 /**
- * IC10 opcode tables and the arithmetic/comparison semantics shared by
- * constant folding, the constexpr interpreter, and code generation.
+ * IC10 opcode tables and the arithmetic/bitwise/comparison semantics shared
+ * by constant folding, the constexpr interpreter, and code generation.
  *
  * Keeping the semantics in one place guarantees that "fold at compile time"
  * and "execute on the chip" agree (IC10 reference: https://stationeers-wiki.com/IC10).
@@ -11,7 +11,9 @@
  * so only the comparisons need tables at all.
  */
 
-import type { ArithmeticOpcode, ComparisonOpcode } from "./formal-ast.ts";
+import type {
+  ArithmeticOpcode, BinaryOpcode, BitwiseOpcode, ComparisonOpcode,
+} from "./formal-ast.ts";
 
 /**
  * First register reserved by the ABI: r16 is sp and r17 is ra, so only
@@ -85,5 +87,70 @@ export function applyArithmetic(op: ArithmeticOpcode, x: number, y: number): num
     case "mul": return x * y;
     case "div": return x / y;
     case "mod": return ic10Mod(x, y);
+  }
+}
+
+/**
+ * The 64-bit two's complement integer a register's double stands for, or
+ * null when it stands for none: the chip truncates toward zero and wraps at
+ * 64 bits, and nothing NaN or infinite survives that conversion.
+ */
+function toInt64(value: number): bigint | null {
+  if (!Number.isFinite(value)) return null;
+  return BigInt.asIntN(64, BigInt(Math.trunc(value)));
+}
+
+/**
+ * Shifts count modulo 64, so `x << 64` is `x` rather than 0 - what the
+ * chip's underlying 64-bit shift does with an out-of-range count.
+ */
+function shiftCount(value: bigint): bigint {
+  return value & 63n;
+}
+
+/**
+ * Evaluate a bitwise operator with IC10 semantics, or NaN when an operand
+ * has no integer form. NaN is how the caller learns the operation did not
+ * fold: `constOp` rejects it, so the instruction is emitted instead.
+ *
+ * Done in BigInt because the chip's words are 64 bits wide and JavaScript's
+ * own bitwise operators are 32: `1 << 40` is 1099511627776 here and 256 in
+ * plain JS. The result comes back as a double, which is what a register
+ * holds - so a value past 2^53 rounds exactly as it would on the chip.
+ */
+export function applyBitwise(op: BitwiseOpcode, x: number, y: number): number {
+  const a = toInt64(x);
+  const b = toInt64(y);
+  if (a === null || b === null) return NaN;
+  switch (op) {
+    case "and": return Number(a & b);
+    case "or": return Number(a | b);
+    case "xor": return Number(a ^ b);
+    case "sll": return Number(BigInt.asIntN(64, a << shiftCount(b)));
+    // Logical: the sign bit shifts in as data, so read the word as unsigned.
+    case "srl": return Number(BigInt.asIntN(64, BigInt.asUintN(64, a) >> shiftCount(b)));
+    // Arithmetic: BigInt's own >> already replicates the sign bit.
+    case "sra": return Number(a >> shiftCount(b));
+  }
+}
+
+/** Evaluate IC10's `not`: every bit of the 64-bit word flipped. */
+export function applyBitwiseNot(x: number): number {
+  const a = toInt64(x);
+  if (a === null) return NaN;
+  return Number(BigInt.asIntN(64, ~a));
+}
+
+/** Evaluate any binary operator - arithmetic or bitwise - as the chip does. */
+export function applyBinary(op: BinaryOpcode, x: number, y: number): number {
+  switch (op) {
+    case "add":
+    case "sub":
+    case "mul":
+    case "div":
+    case "mod":
+      return applyArithmetic(op, x, y);
+    default:
+      return applyBitwise(op, x, y);
   }
 }

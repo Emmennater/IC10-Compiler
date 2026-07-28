@@ -42,7 +42,7 @@ import {
 import {
   AGGREGATORS, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OPCODE_ALIASES, SET_OPCODES,
   STACK_TOP,
-  applyArithmetic, compare,
+  applyBinary, applyBitwiseNot, compare,
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
 import { collectAssignedNames, countReturns, fnVarRefs, type FnInfo, type FnTable } from "./functions.ts";
@@ -639,6 +639,16 @@ class FrameLowerer {
       this.boolVregs.add(dest);
       return { kind: "vreg", id: dest };
     }
+    if (node.opcode === "bitnot") {
+      // Bitwise NOT: IC10's own `not`, one operand and a destination.
+      if (a.kind === "const") {
+        const folded = constOp(applyBitwiseNot(parseFloat(a.text)));
+        if (folded) return folded;
+      }
+      const dest = this.ids.newVreg();
+      this.emit({ op: "alu", opcode: "not", dest, args: [a], node });
+      return { kind: "vreg", id: dest };
+    }
     if (a.kind === "const") {
       const folded = constOp(-parseFloat(a.text));
       if (folded) return folded;
@@ -685,14 +695,16 @@ class FrameLowerer {
       return { kind: "vreg", id: dest };
     }
 
-    // Arithmetic: constant folding first
+    // Arithmetic and bitwise: constant folding first
     // (constants propagated through variables included)
     if (a.kind === "const" && b.kind === "const") {
-      const folded = constOp(applyArithmetic(node.opcode, parseFloat(a.text), parseFloat(b.text)));
+      const folded = constOp(applyBinary(node.opcode, parseFloat(a.text), parseFloat(b.text)));
       if (folded) return folded;
     }
 
-    // Algebraic identities that make the whole operation free
+    // Algebraic identities that make the whole operation free. None exists
+    // for the bitwise opcodes: every one of them truncates its operands to
+    // integers, so even `x << 0` is not the identity on `x`.
     if (node.opcode === "add" && isConstText(a, "0")) return b;
     if ((node.opcode === "add" || node.opcode === "sub") && isConstText(b, "0")) return a;
     if (node.opcode === "mul" && isConstText(a, "1")) return b;

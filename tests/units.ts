@@ -8,7 +8,9 @@
  */
 
 import { ErrorReporter, kids } from "../compiler/syntax.ts";
-import { applyArithmetic, compare, ic10Mod } from "../compiler/tables.ts";
+import {
+  applyArithmetic, applyBinary, applyBitwise, applyBitwiseNot, compare, ic10Mod,
+} from "../compiler/tables.ts";
 import {
   IdAllocator, assertNever, constOp, destOf, operandsOf, usesOf, hasSideEffect, symsOf,
 } from "../compiler/ir.ts";
@@ -22,7 +24,7 @@ import { foldConstantOffsets } from "../compiler/optimize.ts";
 import type { Inst, Operand, UnnumberedInst } from "../compiler/ir.ts";
 import type { SyntaxNode } from "../compiler/syntax.ts";
 import type {
-  ArithmeticOpcode, BinaryOp, ComparisonOp, ComparisonOpcode, Constant, Expression,
+  BinaryOp, BinaryOpcode, ComparisonOp, ComparisonOpcode, Constant, Expression,
   Identifier, LogicalOp, StringExpr, UnaryOp,
 } from "../compiler/formal-ast.ts";
 import { node, num } from "./ast.ts";
@@ -60,7 +62,7 @@ const at = { from: 0, to: 0 };
 const k = (value: number): Constant => ({ type: "constant", ...at, value });
 const id = (name: string): Identifier => ({ type: "identifier", ...at, name });
 const text = (value: string): StringExpr => ({ type: "string", ...at, value: `"${value}"` });
-const arith = (left: Expression, opcode: ArithmeticOpcode, right: Expression): BinaryOp =>
+const arith = (left: Expression, opcode: BinaryOpcode, right: Expression): BinaryOp =>
   ({ type: "binaryop", ...at, left, right, opcode });
 const cmp = (left: Expression, opcode: ComparisonOpcode, right: Expression): ComparisonOp =>
   ({ type: "comparisonop", ...at, left, right, opcode });
@@ -84,6 +86,33 @@ export function runUnitTests(): UnitResult[] {
   equal("applyArithmetic div", applyArithmetic("div", 7, 2), 3.5);
   check("compare('ge', 2, 2)", compare("ge", 2, 2));
   check("compare('gt', 2, 2) is false", !compare("gt", 2, 2));
+
+  // Bitwise: the chip's words are 64 bits and JavaScript's own operators are
+  // 32, so every one of these is computed in BigInt. `1 << 40` is the case
+  // that catches a lapse back to plain JS - it would come out as 256.
+  equal("applyBitwise and", applyBitwise("and", 12, 10), 8);
+  equal("applyBitwise or", applyBitwise("or", 12, 3), 15);
+  equal("applyBitwise xor", applyBitwise("xor", 12, 10), 6);
+  equal("applyBitwise sll past 32 bits", applyBitwise("sll", 1, 40), 1099511627776);
+  equal("applyBitwise sll wraps at 64 bits", applyBitwise("sll", 1, 63), -9223372036854775808);
+  // The two right shifts differ only on a negative value: sra replicates the
+  // sign bit, srl shifts zeroes into it.
+  equal("applyBitwise sra keeps the sign", applyBitwise("sra", -8, 2), -2);
+  equal("applyBitwise srl fills with zeroes", applyBitwise("srl", -8, 60), 15);
+  equal("applyBitwise srl of a positive matches sra", applyBitwise("srl", 8, 2), applyBitwise("sra", 8, 2));
+  // Shift counts run modulo 64, as a 64-bit shift instruction does.
+  equal("applyBitwise shift count wraps at 64", applyBitwise("sll", 5, 64), 5);
+  // Operands are truncated toward zero first: these are integer operations
+  // even though a register holds a double.
+  equal("applyBitwise truncates its operands", applyBitwise("and", 5.9, 3), 1);
+  equal("applyBitwise truncates toward zero", applyBitwise("or", -1.9, 0), -1);
+  check("applyBitwise of a non-integer value is NaN", Number.isNaN(applyBitwise("and", 1 / 0, 1)));
+  equal("applyBitwiseNot(0) is -1 (all bits set)", applyBitwiseNot(0), -1);
+  equal("applyBitwiseNot is its own inverse", applyBitwiseNot(applyBitwiseNot(1234)), 1234);
+  check("applyBitwiseNot(NaN) is NaN", Number.isNaN(applyBitwiseNot(0 / 0)));
+  // applyBinary is the single entry point both kinds share
+  equal("applyBinary dispatches arithmetic", applyBinary("mod", -7, 3), 2);
+  equal("applyBinary dispatches bitwise", applyBinary("xor", 12, 10), 6);
 
   // constOp must reject values with no plain IC10 literal
   equal("constOp(1/0) is null", constOp(1 / 0), null);
@@ -118,6 +147,15 @@ export function runUnitTests(): UnitResult[] {
     foldExpression(arith(k(1), "div", k(0)), noConstants), null);
   equal("fold comparison to 0/1", foldExpression(cmp(k(2), "gt", k(3)), noConstants)?.text, "0");
   equal("fold !0", foldExpression(unary("not", k(0)), noConstants)?.text, "1");
+  // Bitwise folds through the same shared semantics, so a folded `1 << 40`
+  // cannot disagree with what the chip computes.
+  equal("fold 12 & 10", foldExpression(arith(k(12), "and", k(10)), noConstants)?.text, "8");
+  equal("fold 1 << 40 at 64 bits",
+    foldExpression(arith(k(1), "sll", k(40)), noConstants)?.text, "1099511627776");
+  equal("fold ~0", foldExpression(unary("bitnot", k(0)), noConstants)?.text, "-1");
+  // `~` is not `!`: one flips every bit, the other is an exact 0/1.
+  equal("fold ~1 is -2, not 0", foldExpression(unary("bitnot", k(1)), noConstants)?.text, "-2");
+  equal("fold !1 is 0", foldExpression(unary("not", k(1)), noConstants)?.text, "0");
   // && / || fold when one side settles the outcome, even if the other is unknown
   equal("fold 0 && unknown", foldExpression(logic(k(0), "and", id("x")), noConstants)?.text, "0");
   equal("fold 1 || unknown", foldExpression(logic(k(1), "or", id("x")), noConstants)?.text, "1");

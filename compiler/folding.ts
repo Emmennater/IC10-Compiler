@@ -10,7 +10,7 @@
 
 import type { Expression } from "./formal-ast.ts";
 import { constBoolOp, constOp, type ConstOperand } from "./ir.ts";
-import { applyArithmetic, compare } from "./tables.ts";
+import { applyBinary, applyBitwiseNot, compare } from "./tables.ts";
 
 /** What folding needs to know about a name: its constant value, if any. */
 export type ConstantLookup = (name: string) => ConstOperand | null;
@@ -45,13 +45,14 @@ export function foldExpression(node: Expression, constantOf: ConstantLookup): Co
       if (!value) return null;
       if (node.opcode === "neg") return constOp(-parseFloat(value.text));
       if (node.opcode === "not") return constBoolOp(parseFloat(value.text) === 0);
+      if (node.opcode === "bitnot") return constOp(applyBitwiseNot(parseFloat(value.text)));
       return value; // unary `+` is identity
     }
     case "binaryop": {
       const a = foldExpression(node.left, constantOf);
       const b = foldExpression(node.right, constantOf);
       if (!a || !b) return null;
-      return constOp(applyArithmetic(node.opcode, parseFloat(a.text), parseFloat(b.text)));
+      return constOp(applyBinary(node.opcode, parseFloat(a.text), parseFloat(b.text)));
     }
     case "comparisonop": {
       const a = foldExpression(node.left, constantOf);

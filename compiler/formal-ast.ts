@@ -111,7 +111,7 @@ export type CompoundAssignOp = Range & {
   type: "compoundassignop";
   target: AssignTarget;
   right: Expression;
-  opcode: ArithmeticOpcode;
+  opcode: BinaryOpcode;
 };
 
 // if <expression> then <block> elif <expression> then <block> else <block> end
@@ -285,20 +285,37 @@ export type ListIndexing = Range & {
 
 export type ArithmeticOpcode = "add" | "sub" | "mul" | "div" | "mod";
 
+/**
+ * IC10's bitwise instructions, as reached from an operator. The chip converts
+ * both operands to 64-bit two's complement integers first, so these are
+ * integer operations even though a register holds a double.
+ *
+ * Only the six an operator can produce are listed - `nor` and `sla` have no
+ * spelling in this language and are reached, like any other opcode, by
+ * calling them directly (`nor(a, b)`).
+ */
+export type BitwiseOpcode = "and" | "or" | "xor" | "sll" | "srl" | "sra";
+
+/** Everything a binary operator or a compound assignment can resolve to. */
+export type BinaryOpcode = ArithmeticOpcode | BitwiseOpcode;
+
 // <expression> <op> <expression>
 export type BinaryOp = Range & {
   type: "binaryop";
   left: Expression;
   right: Expression;
-  opcode: ArithmeticOpcode;
+  opcode: BinaryOpcode;
 };
 
 // <op> <expression>
 export type UnaryOp = Range & {
   type: "unaryop";
   value: Expression;
-  /** `pos` is unary `+`, which the grammar accepts and which is identity. */
-  opcode: "neg" | "pos" | "not";
+  /**
+   * `pos` is unary `+`, which the grammar accepts and which is identity.
+   * `not` is logical `!` (an exact 0/1); `bitnot` is `~`, IC10's `not`.
+   */
+  opcode: "neg" | "pos" | "not" | "bitnot";
 };
 
 export type ComparisonOpcode = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
@@ -336,8 +353,11 @@ export type FunctionCall = Range & {
 
 // Operator tables. Keyed by the operator's source text; the value type is
 // what splits the grammar's single `BinaryOp` production three ways.
-const ARITHMETIC_OPS: Record<string, ArithmeticOpcode | undefined> = {
+const BINARY_OPS: Record<string, BinaryOpcode | undefined> = {
   "+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod",
+  // `>>` keeps the sign bit and `>>>` does not, the same split JavaScript
+  // makes; IC10 spells them `sra` and `srl`.
+  "&": "and", "|": "or", "^": "xor", "<<": "sll", ">>": "sra", ">>>": "srl",
 };
 
 const COMPARISON_OPS: Record<string, ComparisonOpcode | undefined> = {
@@ -349,7 +369,7 @@ const LOGICAL_OPS: Record<string, LogicalOp["opcode"] | undefined> = {
 };
 
 const UNARY_OPS: Record<string, UnaryOp["opcode"] | undefined> = {
-  "-": "neg", "+": "pos", "!": "not",
+  "-": "neg", "+": "pos", "!": "not", "~": "bitnot",
 };
 
 const DEVICE_PINS: ReadonlySet<string> = new Set<DevicePin>([
@@ -559,8 +579,8 @@ function convertBinary(node: SyntaxNode): BinaryOp | ComparisonOp | LogicalOp {
   const right = convertExpression(rightNode);
   const range = rangeOf(node);
 
-  const arithmetic = ARITHMETIC_OPS[opNode.text];
-  if (arithmetic) return { type: "binaryop", ...range, left, right, opcode: arithmetic };
+  const binary = BINARY_OPS[opNode.text];
+  if (binary) return { type: "binaryop", ...range, left, right, opcode: binary };
 
   const comparison = COMPARISON_OPS[opNode.text];
   if (comparison) return { type: "comparisonop", ...range, left, right, opcode: comparison };
@@ -636,7 +656,7 @@ export function convertStatement(node: SyntaxNode): Statement {
         return { type: "assignment", ...rangeOf(node), target, value };
       }
       // `+=` etc: the opcode is the operator with the `=` stripped.
-      const opcode = ARITHMETIC_OPS[opNode.text.slice(0, -1)];
+      const opcode = BINARY_OPS[opNode.text.slice(0, -1)];
       if (!opcode) fail(`Unknown operator ${opNode.text}`, opNode);
       return { type: "compoundassignop", ...rangeOf(node), target, right: value, opcode };
     }

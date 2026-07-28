@@ -177,6 +177,77 @@ describe("expressions", () => {
     });
   });
 
+  test("~ is a distinct unary operator from !", () => {
+    const statement = only("x = ~y") as Assignment;
+    expect(statement.value).toMatchObject({
+      type: "unaryop",
+      opcode: "bitnot",
+      value: { type: "identifier", name: "y" },
+    });
+  });
+
+  test("bitwise operators resolve to their IC10 opcodes", () => {
+    const opcodeOf = (source: string): string =>
+      ((only(`x = ${source}`) as Assignment).value as { opcode: string }).opcode;
+    expect(opcodeOf("a & b")).toBe("and");
+    expect(opcodeOf("a | b")).toBe("or");
+    expect(opcodeOf("a ^ b")).toBe("xor");
+    expect(opcodeOf("a << b")).toBe("sll");
+    // `>>` keeps the sign bit, `>>>` does not - the JavaScript split.
+    expect(opcodeOf("a >> b")).toBe("sra");
+    expect(opcodeOf("a >>> b")).toBe("srl");
+  });
+
+  test("bitwise precedence follows C", () => {
+    // & tighter than ^ tighter than |, and all three looser than comparison.
+    const statement = only("x = 1 | 2 ^ 3 & 4 == 5") as Assignment;
+    expect(statement.value).toMatchObject({
+      type: "binaryop",
+      opcode: "or",
+      left: { type: "constant", value: 1 },
+      right: {
+        type: "binaryop",
+        opcode: "xor",
+        left: { type: "constant", value: 2 },
+        right: {
+          type: "binaryop",
+          opcode: "and",
+          left: { type: "constant", value: 3 },
+          right: { type: "comparisonop", opcode: "eq" },
+        },
+      },
+    });
+  });
+
+  test("shifts bind tighter than comparison and looser than addition", () => {
+    const statement = only("x = 1 + 2 << 3 < 4") as Assignment;
+    expect(statement.value).toMatchObject({
+      type: "comparisonop",
+      opcode: "lt",
+      left: {
+        type: "binaryop",
+        opcode: "sll",
+        left: { type: "binaryop", opcode: "add" },
+        right: { type: "constant", value: 3 },
+      },
+    });
+  });
+
+  test("&& and || are still logical, not bitwise", () => {
+    const statement = only("x = a && b") as Assignment;
+    expect(statement.value).toMatchObject({ type: "logicalop", opcode: "and" });
+  });
+
+  test("compound assignment carries the bitwise opcode", () => {
+    const opcodeOf = (source: string): string => (only(source) as CompoundAssignOp).opcode;
+    expect(opcodeOf("x &= 1")).toBe("and");
+    expect(opcodeOf("x |= 1")).toBe("or");
+    expect(opcodeOf("x ^= 1")).toBe("xor");
+    expect(opcodeOf("x <<= 1")).toBe("sll");
+    expect(opcodeOf("x >>= 1")).toBe("sra");
+    expect(opcodeOf("x >>>= 1")).toBe("srl");
+  });
+
   test("booleans, strings and floats", () => {
     const block = formal('let a = true\nlet b = "hi\\n"\nlet c = 1.5');
     expect((block.statements[0] as Declaration).value).toMatchObject({ type: "bool", value: true });
