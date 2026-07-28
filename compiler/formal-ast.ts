@@ -203,7 +203,7 @@ export type DeviceDef = Range & {
 export type ArrayDeclaration = Range & {
   type: "arraydeclaration";
   name: Identifier;
-  size: Constant;
+  size: Expression;
   list?: List;
 }
 
@@ -851,7 +851,7 @@ export function convertStatement(node: SyntaxNode): Statement {
 
     case "ArrayDeclaration": {
       const nameNode = parts.find(c => c.type === "VariableName");
-      const sizeNode = parts.find(c => c.type === "Integer");
+      const sizeNode = betweenBrackets(node).find(c => EXPRESSION_TYPES.has(c.type));
       if (!nameNode || !sizeNode) fail("Malformed array declaration", node);
       const listNode = parts.find(c => c.type === "List");
       if (listNode) {

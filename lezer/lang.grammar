@@ -22,7 +22,7 @@ Declaration {
 }
 
 ArrayDeclaration {
-  kw<"let"> VariableName !list BracketLeft Integer BracketRight
+  kw<"let"> VariableName !list BracketLeft expression BracketRight
   (Assign List)?
 }
 
@@ -115,7 +115,7 @@ List { BracketLeft (expression (Comma expression)*)? BracketRight }
     ("0" $[bB] $[01] $[01_]*)
   }
   Number { based | (@digit+ ("." | "." @digit+)? $[cC]?) }
-  Integer { based | @digit+ }
+  // Integer { based | @digit+ }
   MulOp { "*" | "/" | "%" }
   AddOp { "+" | "-" }
   Not { "!" }

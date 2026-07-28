@@ -19,5 +19,7 @@ export const
   DeviceProperty = 17,
   Dot = 18,
   Register = 19,
-  Label = 20,
-  LabelName = 21
+  UnaryOp = 20,
+  AddOp = 21,
+  Label = 22,
+  LabelName = 23

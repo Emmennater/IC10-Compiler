@@ -1553,9 +1553,14 @@ class FrameLowerer {
 
   private processListDeclaration(statement: ListDeclaration): void {
     const name = statement.name.name;
-    const size = statement.size.value;
     const list = statement.list ? statement.list.elements : [];
     
+    // Determine list size
+    const sizeOp = this.fold(statement.size);
+    if (!sizeOp) throw this.errors.error("List size must be constant", statement.size);
+    const size = parseFloat(sizeOp.text);
+    if (!Number.isInteger(size)) throw this.errors.error("List size must be an integer", statement.size);
+
     // Calculate the next available stack address
     const arrayDecls = this.shared.arrayTable.values();
     let baseAddr = STACK_TOP;

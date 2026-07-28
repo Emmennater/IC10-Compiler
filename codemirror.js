@@ -144,7 +144,7 @@ const lang_ic10 = LRLanguage.define({
     props: [
       styleTags({
         "InstructionName FunctionName": t.function(t.variableName),
-        "ParenLeft ParenRight Colon Dot": t.operator,
+        "ParenLeft ParenRight Colon Dot AddOp": t.operator,
         "Number Integer": t.number,
         String: t.string,
         Channel: device,
