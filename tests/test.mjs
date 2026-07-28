@@ -1746,6 +1746,81 @@ export const cases = {
     source: "a = -5 % 3",
     expected: "move a 1",
   },
+  // Numeric literals
+  "hexadecimal and binary literals": {
+    source: [
+      "a = 0x1F",
+      "b = 0b1011",
+      "c = 0xDEAD_BEEF",
+      "d = 0b0110_1000",
+    ],
+    // A literal is carried through the compiler as a number, so all four
+    // come out in the decimal spelling the chip reads identically.
+    expected: [
+      "move a 31",
+      "move b 11",
+      "move c 3735928559",
+      "move d 104",
+    ],
+  },
+  "a based literal is a 64-bit two's complement word": {
+    // Sixty-four 1 bits is -1, the reading the game documents for its own
+    // binary notation - and the width the bitwise instructions work in.
+    source: `a = 0b${"1".repeat(64)}\nb = 0xFFFFFFFF`,
+    expected: "move a -1\nmove b 4294967295",
+  },
+  "hex masks read naturally alongside the bitwise operators": {
+    source: "let x = a\nb = x & 0xFF\nc = x | 0b1000_0000",
+    expected: "move r0 a\nand r1 r0 255\nmove b r1\nor r0 r0 128\nmove c r0",
+  },
+  "the c suffix converts a Celsius reading to kelvin": {
+    source: "a = 23c\nb = 0c\nc = 100C\nd = 25.5c",
+    expected: "move a 296.15\nmove b 273.15\nmove c 373.15\nmove d 298.65",
+  },
+  "a negative Celsius literal keeps its sign inside the reading": {
+    // -40c is 233.15 K, not -313.15. The raw double addition would give
+    // 233.14999999999998, so this pins the rounding too.
+    source: "a = -40c\nb = -273.15c",
+    expected: "move a 233.15\nmove b 0",
+  },
+  "Celsius defines against a device reading": {
+    // The pattern the game's own docs spell out as `define TempMax 296.15
+    // #23C`, with the comment doing the conversion by hand.
+    source: [
+      "define TempMax = 23c",
+      "define TempMin = 10c",
+      "device valve = d0",
+      "device sensor = d1",
+      "if sensor.Temperature > TempMax then valve.On = 1 end",
+      "if sensor.Temperature < TempMin then valve.On = 0 end",
+    ],
+    expected: [
+      "define TempMax 296.15",
+      "define TempMin 283.15",
+      "alias valve d0",
+      "alias sensor d1",
+      "l r0 sensor Temperature",
+      "ble r0 TempMax endif0",
+      "s valve On 1",
+      "endif0:",
+      "l r0 sensor Temperature",
+      "bge r0 TempMin endif1",
+      "s valve On 0",
+      "endif1:",
+    ],
+  },
+  "based literals are accepted as an array size": {
+    source: "let arr[0x2] = [1, 2]\na = arr[0]",
+    expected: "poke 510 1\npoke 511 2\nget r0 db 510\nmove a r0",
+  },
+  "a malformed based literal is a syntax error": {
+    source: "a = 0xZZ",
+    error: "Line 0: Syntax error",
+  },
+  "a number directly followed by a name is still a syntax error": {
+    source: "a = 1 b",
+    error: "Line 0: Syntax error",
+  },
   // Bitwise operators
   "bitwise operators lower to their IC10 instructions": {
     source: [

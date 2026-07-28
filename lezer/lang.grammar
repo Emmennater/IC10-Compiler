@@ -106,8 +106,16 @@ List { BracketLeft (expression (Comma expression)*)? BracketRight }
 @tokens {
   identifier { $[a-zA-Z_] $[a-zA-Z0-9_]* }
   spaces { @whitespace }
-  Number { @digit+ ("." | "." @digit+)? }
-  Integer { @digit+ }
+  // A base prefix (0x/0b, as in JavaScript) or a "c" suffix marking the
+  // number as a Celsius reading. `_` may separate digits of a based literal,
+  // the way the game's own binary notation writes %0110_1000. Longest match
+  // picks the based forms over the plain "0" that also starts them.
+  based {
+    ("0" $[xX] $[0-9a-fA-F] $[0-9a-fA-F_]*) |
+    ("0" $[bB] $[01] $[01_]*)
+  }
+  Number { based | (@digit+ ("." | "." @digit+)? $[cC]?) }
+  Integer { based | @digit+ }
   MulOp { "*" | "/" | "%" }
   AddOp { "+" | "-" }
   Not { "!" }

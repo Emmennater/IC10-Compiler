@@ -248,6 +248,68 @@ describe("expressions", () => {
     expect(opcodeOf("x >>>= 1")).toBe("srl");
   });
 
+  test("hexadecimal and binary literals", () => {
+    const valueOf = (source: string): number =>
+      ((only(`x = ${source}`) as Assignment).value as { value: number }).value;
+    expect(valueOf("0x1F")).toBe(31);
+    expect(valueOf("0XfF")).toBe(255);
+    expect(valueOf("0b1011")).toBe(11);
+    expect(valueOf("0B1")).toBe(1);
+    // `_` separates digits, as the game's own %0110_1000 notation does
+    expect(valueOf("0xDEAD_BEEF")).toBe(3735928559);
+    expect(valueOf("0b0110_1000")).toBe(104);
+    // A `c` in a hex literal is a digit, not the Celsius suffix
+    expect(valueOf("0x10c")).toBe(268);
+  });
+
+  test("a based literal is a 64-bit two's complement word", () => {
+    const valueOf = (source: string): number =>
+      ((only(`x = ${source}`) as Assignment).value as { value: number }).value;
+    // Sixty-four 1 bits is -1, the reading the game documents - not 2^64 - 1
+    expect(valueOf(`0b${"1".repeat(64)}`)).toBe(-1);
+    expect(valueOf("0xFFFF_FFFF_FFFF_FFFF")).toBe(-1);
+    // and a 32-bit mask is still positive at that width
+    expect(valueOf("0xFFFFFFFF")).toBe(4294967295);
+  });
+
+  test("the c suffix converts a Celsius reading to kelvin", () => {
+    const valueOf = (source: string): number =>
+      ((only(`x = ${source}`) as Assignment).value as { value: number }).value;
+    expect(valueOf("0c")).toBe(273.15);
+    expect(valueOf("23c")).toBe(296.15);
+    expect(valueOf("100C")).toBe(373.15);
+    expect(valueOf("25.5c")).toBe(298.65);
+    expect(valueOf("36.6c")).toBe(309.75);
+  });
+
+  test("a minus directly on a Celsius literal is part of the reading", () => {
+    const valueOf = (source: string): number =>
+      ((only(`x = ${source}`) as Assignment).value as { value: number }).value;
+    // -40c is the temperature -40 degrees (233.15 K), not the negation of
+    // what 40 degrees is in kelvin (-313.15). The raw double addition gives
+    // 233.14999999999998, so this also pins the rounding.
+    expect(valueOf("-40c")).toBe(233.15);
+    expect(valueOf("-273.15c")).toBe(0);
+    // Parentheses ask for the negation explicitly, and get it: the minus is
+    // a real operation over the kelvin value, not part of the reading.
+    expect((only("x = -(40c)") as Assignment).value).toMatchObject({
+      type: "unaryop",
+      opcode: "neg",
+      value: { type: "constant", value: 313.15 },
+    });
+  });
+
+  test("a minus directly on any literal folds into it", () => {
+    // The sign-folding rule is not Celsius-specific: -7 is the constant -7,
+    // not a negation node over 7.
+    expect((only("x = -7") as Assignment).value).toMatchObject({
+      type: "constant",
+      value: -7,
+    });
+    // but a minus on anything else is still a unary operation
+    expect((only("x = -y") as Assignment).value).toMatchObject({ type: "unaryop", opcode: "neg" });
+  });
+
   test("booleans, strings and floats", () => {
     const block = formal('let a = true\nlet b = "hi\\n"\nlet c = 1.5');
     expect((block.statements[0] as Declaration).value).toMatchObject({ type: "bool", value: true });

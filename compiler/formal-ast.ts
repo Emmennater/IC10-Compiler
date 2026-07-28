@@ -376,6 +376,51 @@ const DEVICE_PINS: ReadonlySet<string> = new Set<DevicePin>([
   "d0", "d1", "d2", "d3", "d4", "d5", "db",
 ]);
 
+/**
+ * Zero Celsius in kelvin. Every temperature the chip reads or writes is in
+ * kelvin, so a `c`-suffixed literal is converted once, here, and nothing
+ * downstream ever sees a Celsius value.
+ */
+const KELVIN_AT_ZERO_CELSIUS = 273.15;
+
+/**
+ * The value a numeric literal token stands for. Four spellings:
+ *
+ *     42        decimal            0x2a    hexadecimal
+ *     0b101010  binary             23c     a Celsius reading, in kelvin
+ *
+ * A based literal is read as a **64-bit two's complement word**, so
+ * sixty-four 1 bits is -1 rather than 2^64 - 1. That is the reading the
+ * game documents for its own binary notation, and it is the same width the
+ * bitwise instructions work in - a mask written out bit by bit means the
+ * same thing to `and` as it does here.
+ *
+ * `sign` folds a unary minus into the literal instead of applying it after,
+ * which only matters for Celsius: -40c is the temperature -40 degrees, not
+ * the negation of what 40 degrees is in kelvin.
+ */
+function decodeNumber(text: string, sign: 1 | -1 = 1): number {
+  const digits = text.replace(/_/g, "");
+  const base = digits.slice(0, 2).toLowerCase();
+  if (base === "0x" || base === "0b") {
+    return sign * Number(BigInt.asIntN(64, BigInt(base + digits.slice(2))));
+  }
+  if (digits.endsWith("c") || digits.endsWith("C")) {
+    const reading = digits.slice(0, -1);
+    // The offset is exact to two decimals and the reading to however many it
+    // was written with; rounding to that keeps -40c at 233.15 instead of the
+    // 233.14999999999998 the raw double addition produces.
+    const decimals = Math.max(2, reading.split(".")[1]?.length ?? 0);
+    return Number((sign * parseFloat(reading) + KELVIN_AT_ZERO_CELSIUS).toFixed(decimals));
+  }
+  return sign * parseFloat(digits);
+}
+
+/** Whether a node is a bare numeric literal token, not a larger expression. */
+function isNumberToken(node: SyntaxNode): boolean {
+  return node.type === "Number" || node.type === "Integer";
+}
+
 /** Escape sequences the grammar's String token allows. */
 // const STRING_ESCAPES: Record<string, string | undefined> = {
 //   n: "\n", r: "\r", t: "\t", "0": "\0",
@@ -514,7 +559,7 @@ function convertValue(node: SyntaxNode): Identifier | Device | DeviceProp | Devi
         ...rangeOf(node),
         type: "devicechannelprop",
         device,
-        channel: { type: "constant", ...rangeOf(indexer), value: parseInt(indexer.text, 10) },
+        channel: { type: "constant", ...rangeOf(indexer), value: Math.trunc(decodeNumber(indexer.text)) },
         prop,
       } as DeviceChannelProp;
     } else {
@@ -595,7 +640,7 @@ export function convertExpression(node: SyntaxNode): Expression {
   switch (node.type) {
     case "Integer":
     case "Number":
-      return { type: "constant", ...rangeOf(node), value: parseFloat(node.text) };
+      return { type: "constant", ...rangeOf(node), value: decodeNumber(node.text) };
     case "Bool":
       return { type: "bool", ...rangeOf(node), value: node.text === "true" };
     case "String":
@@ -613,6 +658,14 @@ export function convertExpression(node: SyntaxNode): Expression {
       if (parts.length !== 2) fail("Malformed unary operation", node);
       const opcode = UNARY_OPS[parts[0].text];
       if (!opcode) fail(`Unknown operator ${parts[0].text}`, parts[0]);
+      // A minus directly on a literal belongs to the literal. For every
+      // spelling but Celsius that is the same number either way; for -40c it
+      // is the difference between 233.15 K and -313.15 K. The rule is
+      // deliberately narrow - only a minus whose operand *is* the token, so
+      // -(40c) still negates the kelvin value, as the parentheses ask.
+      if (opcode === "neg" && isNumberToken(parts[1])) {
+        return { type: "constant", ...rangeOf(node), value: decodeNumber(parts[1].text, -1) };
+      }
       return { type: "unaryop", ...rangeOf(node), value: convertExpression(parts[1]), opcode };
     }
     case "BinaryOp":

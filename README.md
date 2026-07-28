@@ -12,6 +12,29 @@ import { compile } from "./index.ts";
 const ic10 = compile(getAST(source), { removeLabels: false });
 ```
 
+## Literals
+
+| Spelling | Value | |
+| --- | --- | --- |
+| `42` `1.5` | 42, 1.5 | |
+| `0x1F` `0XfF` | 31, 255 | hexadecimal |
+| `0b1011` | 11 | binary |
+| `0xDEAD_BEEF` `0b0110_1000` | 3735928559, 104 | `_` separates digits, as the game's `%0110_1000` does |
+| `23c` `100C` | 296.15, 373.15 | a Celsius reading, converted to the kelvin the chip works in |
+
+A based literal is read as a **64-bit two's complement word**, so
+`0b1111…1111` (sixty-four ones) is `-1` rather than 2^64 − 1 — the reading
+the game documents, and the same width the bitwise instructions work in.
+
+A minus sign directly on a literal is folded into the literal, so `-40c` is
+the temperature −40 °C (233.15 K) and not the negation of what 40 °C is in
+kelvin. The rule is deliberately narrow — only a minus whose operand *is*
+the token — so `-(40c)` still negates, as the parentheses ask.
+
+Literals are carried through the compiler as numbers, not as their source
+spelling, so all of these are emitted in decimal: `move a 31`, `move a
+296.15`. The chip reads that identically.
+
 ## Operators
 
 | Operator | IC10 | Notes |
@@ -162,7 +185,7 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
    wrapping `tests/test.mjs`) - real source strings through the actual
    parser (`ast.ts` + `lezer/lang.grammar`) and `compile()`, asserting exact
    output or error message. Also runnable standalone: `node tests/test.mjs`.
-4. **38 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
+4. **43 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
    through `getAST` → `getFormalAST`, asserting the typed tree's shape. It
    touches no part of the compile pipeline.
 
