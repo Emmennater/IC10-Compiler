@@ -63,6 +63,8 @@ export function eliminateDeadCode(program: Inst[]): Inst[] {
       case "reserve":
         kept.push(inst);
         continue;
+      default:
+        break;
     }
     const dest = destOf(inst);
     if (!hasSideEffect(inst) && (dest === null || !live.has(dest))) continue;
@@ -344,9 +346,31 @@ function writtenBetween(program: Inst[], from: number, to: number, carrier: Oper
  * anywhere, a jump or branch skips what follows, and a jal runs a body
  * that writes the shared parameter and result vregs.
  */
-function leavesStraightLine(inst: Inst): boolean {
+function leavesLinearPath(inst: Inst): boolean {
   return inst.op === "label" || inst.op === "jump" || inst.op === "branch" ||
     inst.op === "jal" || inst.op === "ret";
+}
+
+/** Collect all straight-line runs in the program [from, to] */
+function getLinearPaths(program: Inst[]): { from: number, to: number }[] {
+  const lines: { from: number, to: number }[] = [];
+  let from = 0;
+  for (let i = 0; i < program.length; i++) {
+    if (leavesLinearPath(program[i])) {
+      if (from < i) lines.push({ from, to: i - 1 });
+      from = i + 1;
+    }
+  }
+  if (from < program.length) lines.push({ from, to: program.length - 1 });
+  return lines;
+}
+
+function getVregUseCounts(program: Inst[]): Map<number, number> {
+  const vregUseCounts = new Map<number, number>();
+  for (const inst of program) {
+    for (const v of usesOf(inst)) vregUseCounts.set(v, (vregUseCounts.get(v) ?? 0) + 1);
+  }
+  return vregUseCounts;
 }
 
 /**
@@ -360,9 +384,13 @@ function leavesStraightLine(inst: Inst): boolean {
  *  - The producer writes some *other* register, so the consumer can read
  *    the producer's own carrier instead. Nothing is deleted here - the
  *    producer is simply left with no consumer, and dead code elimination
- *    is what retires it. Only done when the producer's result has exactly
- *    one reader, so the rewrite always shortens a live range rather than
- *    trading one for a longer one.
+ *    is what retires it. Worth doing only when the producer really loses
+ *    its last reader, so the rewrite shortens a live range instead of
+ *    trading one for a longer one. That is true either because the
+ *    consumer was its only reader at all, or because the consumer
+ *    overwrites the register and so ends the value there - a distinction
+ *    a use count cannot make, since it counts reads of the *register*
+ *    across the whole program, not reads of one definition.
  *  - The producer accumulates into the very register the consumer
  *    overwrites (`add h h 1` twice, the shape a demoted loop counter
  *    lowers to). The carrier *is* what the producer clobbers, so the
@@ -374,61 +402,75 @@ export function foldConstantOffsets(program: Inst[]): Inst[] | null {
   // Rewrites land in a working copy so that a consumer scanning backward
   // sees folds already made ahead of it and chains of three or more
   // collapse in a single sweep.
-  const working = [...program];
-  const dropped = new Set<number>(); // indices into working, not instruction ids
+  const newProgram = [...program];
+  const dropped = new Set<number>(); // indices into newProgram, not instruction ids
 
-  // Readers per vreg. Counted once up front: a rewrite only ever moves a
-  // read from a producer's dest onto that producer's carrier, and the
-  // guard below is always asked about a dest, whose count never grows.
-  const readers = new Map<number, number>();
-  for (const inst of program) {
-    for (const v of usesOf(inst)) readers.set(v, (readers.get(v) ?? 0) + 1);
-  }
+  // A rewrite only ever moves a read from a producer's dest onto that producer's carrier,
+  // and the guard below is always asked about a dest, whose count never grows.
+  const vregUseCounts = getVregUseCounts(program);
+  const linearPaths = getLinearPaths(program);
 
   let changed = false;
-  let runStart = 0;
-  for (let end = 0; end <= working.length; end++) {
-    if (end < working.length && !leavesStraightLine(working[end])) continue;
+  
+  for (const path of linearPaths) {
+    for (let end = path.from; end <= path.to; end++) {
+      const affineInst = newProgram[end];
+      
+      // 1) Find an affine
+      if (affineInst.op !== "alu") continue;
+      const affine = asAffine(affineInst);
+      if (!affine || affine.carrier.kind !== "vreg") continue;
 
-    for (let j = runStart; j < end; j++) {
-      const consumer = working[j];
-      if (consumer.op !== "alu") continue;
-      const outer = asAffine(consumer);
-      if (outer === null || outer.carrier.kind !== "vreg") continue;
-      const carried = outer.carrier.id;
-
-      // The reaching definition is the nearest earlier write in the run.
-      let k = j - 1;
-      while (k >= runStart && (dropped.has(k) || destOf(working[k]) !== carried)) k--;
-      if (k < runStart) continue;
-
-      const inner = asAffine(working[k]);
-      if (inner === null) continue;
-
-      const accumulates = inner.carrier.kind === "vreg" && inner.carrier.id === carried;
-      if (accumulates) {
-        if (consumer.dest !== carried) continue;
-        if (readBetween(working, k + 1, j, carried, dropped)) continue;
+      // 2) Find the previous affine
+      let start = end - 1;
+      for (; start >= path.from; start--)
+        if ((!dropped.has(start) && destOf(newProgram[start]) === affine.carrier.id)) break;
+      if (start < path.from) continue;
+      let prevAffine = asAffine(newProgram[start]);
+      if (!prevAffine) continue;
+      
+      
+      // 3) Check that nothing else still wants the values this disturbs
+      const accumulates = prevAffine.carrier.kind === "vreg" && prevAffine.carrier.id === affine.carrier.id;
+      // Whether the consumer overwrites the very register it reads. If it
+      // does, it *ends* the producer's value: every read that follows is a
+      // read of the consumer's own result, so only the instructions in
+      // between can still want what the producer wrote.
+      const endsCarrier = affineInst.dest === affine.carrier.id;
+      // An accumulating producer clobbers its own carrier, so the consumer
+      // sees the pre-producer value only if the producer is deleted - which
+      // is legal only when the consumer is what overwrites the register.
+      if (accumulates && !endsCarrier) continue;
+      if (endsCarrier) {
+        if (readBetween(newProgram, start + 1, end, affine.carrier.id, dropped)) continue;
       } else {
-        if (readers.get(carried) !== 1) continue;
-        if (writtenBetween(working, k + 1, j, inner.carrier, dropped)) continue;
+        // The producer's result outlives the consumer, so a second reader
+        // keeps it alive and the rewrite would trade a short live range for
+        // a longer one. The count is over the whole program rather than over
+        // this one definition, which only ever makes the test stricter.
+        if (vregUseCounts.get(affine.carrier.id) !== 1) continue;
       }
+      // The producer's own carrier must still hold the same value here. (When
+      // it is the register the backward scan tracked, that scan already
+      // stopped at its nearest definition, so this cannot fire.)
+      if (writtenBetween(newProgram, start + 1, end, prevAffine.carrier, dropped)) continue;
 
-      const folded = asAffineInst(consumer, compose(inner, outer));
+      // 4) Compose the two affines
+      const folded = asAffineInst(affineInst, compose(prevAffine, affine));
       if (folded === null) continue;
-      working[j] = folded;
+      newProgram[end] = folded;
+
       // A chain that composes back to the identity leaves the register
-      // holding what it already held, so the copy itself goes too.
-      if (isSelfMove(folded)) dropped.add(j);
-      if (accumulates) dropped.add(k);
+      // holding what it already held, so the copy itself goes too
+      if (isSelfMove(folded)) dropped.add(end);
+      if (accumulates) dropped.add(start);
       changed = true;
     }
-
-    runStart = end + 1;
   }
 
   if (!changed) return null;
-  return working.filter((_, i) => !dropped.has(i));
+  
+  return newProgram.filter((_, i) => !dropped.has(i));
 }
 
 /**

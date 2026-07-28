@@ -187,12 +187,8 @@ export class Lowerer {
         continue;
       }
       if (statement.type === "functiondef") {
+        // Allow functions to have an empty body
         const name = statement.name.name;
-        // The grammar produces no block node at all for an empty body, so
-        // "no statements" is exactly the case the original rejected here.
-        if (statement.body.statements.length === 0) {
-          throw errors.error("Malformed function definition", statement);
-        }
         if (fnTable.has(name)) {
           throw errors.error(`${name} was already defined`, statement.name);
         }
@@ -1282,9 +1278,10 @@ class FrameLowerer {
         break;
       }
       case "arraydeclaration": {
-        if (this.chain.depth > 1) {
-          throw this.errors.error("Arrays must be defined at the top level", statement);
-        }
+        // Lists do not need to be declared at the top level since
+        // their memory space will always be clear on entry.
+        // However, list names will still overlap.
+        // TODO: Make list names unique per stack frame.
         this.processListDeclaration(statement);
         break;
       }

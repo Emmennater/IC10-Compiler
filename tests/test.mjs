@@ -1383,6 +1383,37 @@ export const cases = {
       "move b r0",
     ]
   },
+  "constant offsets fold into a register a function body also reads": {
+    // The two `+= 1` links write the same vreg, but the first one carries a
+    // different register (the `move` of `a` that constant propagation
+    // collapsed into it), so this is not the accumulating shape. What makes
+    // it foldable is that the second link *overwrites* the register: the
+    // reads inside foo and the final `b = x` all see that second value, so
+    // the first link has no reader left and dead code elimination retires
+    // it. A whole-program count of reads of the register says three and
+    // would block the fold, leaving two `add r0 r0 1`.
+    source: [
+      "let x = a",
+      "x += 1",
+      "x += 1",
+      "foo()",
+      "foo()",
+      "b = x",
+      "fn foo() c = x end",
+    ],
+    expected: [
+      "j ProgramStart",
+      "foo:",
+      "move c r0",
+      "j ra",
+      "ProgramStart:",
+      "move r0 a",
+      "add r0 r0 2",
+      "jal foo",
+      "jal foo",
+      "move b r0",
+    ],
+  },
   "compound assignment folds through constants": {
     source: "let x = 5\nx += 3\nc = x",
     expected: "move c 8",

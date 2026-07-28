@@ -2399,13 +2399,14 @@ export function compile(ast: SyntaxNode,
         if (inner === null) continue;
 
         const accumulates = inner.carrier.kind === "vreg" && inner.carrier.id === carried;
-        if (accumulates) {
-          if (consumer.dest !== carried) continue;
+        const endsCarrier = consumer.dest === carried;
+        if (accumulates && !endsCarrier) continue;
+        if (endsCarrier) {
           if (readBetween(working, k + 1, j, carried, dropped)) continue;
         } else {
           if (readers.get(carried) !== 1) continue;
-          if (writtenBetween(working, k + 1, j, inner.carrier, dropped)) continue;
         }
+        if (writtenBetween(working, k + 1, j, inner.carrier, dropped)) continue;
 
         const folded = asAffineInst(consumer, compose(inner, outer));
         if (folded === null) continue;
