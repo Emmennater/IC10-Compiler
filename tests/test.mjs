@@ -1771,6 +1771,84 @@ export const cases = {
       "move d 100",
     ],
   },
+  "an argument is sampled once, however often the body reads it": {
+    // The parameter is read in two different statements. As a lazy alias
+    // each read re-compiled the argument, so this emitted two `l` device
+    // reads and a and b could be handed two different temperatures from
+    // one call (fix 10). The per-statement placeholder cache hid this
+    // whenever both reads sat in the same statement.
+    source: [
+      "fn foo(i)",
+      "  a = i",
+      "  b = i",
+      "end",
+      "foo(d0.Temperature)",
+    ],
+    expected: [
+      "l r0 d0 Temperature",
+      "move a r0",
+      "move b r0",
+    ],
+  },
+  "a parameter read at most once stays lazy": {
+    // The counterpart: one read, so nothing is evaluated up front. The read
+    // stays inside the arm that needs it instead of being hoisted above the
+    // branch, and an unused parameter still emits nothing at all.
+    source: [
+      "fn foo(i)",
+      "  if c then",
+      "    a = i",
+      "  end",
+      "end",
+      "fn unused(i)",
+      "  b = 1",
+      "end",
+      "foo(x)",
+      "unused(d0.Temperature)",
+    ],
+    expected: [
+      "move r0 c",
+      "beqz r0 endif0",
+      "move r0 x",
+      "move a r0",
+      "endif0:",
+      "move b 1",
+    ],
+  },
+  "a constant argument still folds into every use": {
+    // Evaluating up front must not cost the folding: the argument compiles
+    // to a constant operand, so both reads still fold rather than occupying
+    // a register.
+    source: [
+      "fn foo(i)",
+      "  a = i",
+      "  b = i * 3",
+      "end",
+      "foo(7)",
+    ],
+    expected: [
+      "move a 7",
+      "move b 21",
+    ],
+  },
+  "functions (reusing parameters)": {
+    source: [
+      "fn bar(i)",
+      "  return i * i",
+      "end",
+      "fn foo(i)",
+      "  let y = bar(i)",
+      "  return i + y",
+      "end",
+      "d0.Setting = foo(x)",
+    ],
+    expected: [
+      "move r0 x",
+      "mul r1 r0 r0",
+      "add r0 r0 r1",
+      "s d0 Setting r0",
+    ]
+  },
   // Compound assignment (+= / -=)
   "compound assignments (all)": {
     source: [
@@ -1950,9 +2028,9 @@ export const cases = {
     source: "let x = 1\nconst x = 2",
     error: "Line 1: x was already defined",
   },
-  // A const is a compile-time name; a define is the tunable one - it emits an
-  // IC10 define line, is never folded, and so survives editing in the chip.
   "a define is not folded the way a const is": {
+    // A const is a compile-time name; a define is the tunable one - it emits an
+    // IC10 define line, is never folded, and so survives editing in the chip.
     source: "define X = 10\nconst Y = 10\nc = X + 1\nd = Y + 1",
     expected: "define X 10\nadd r0 X 1\nmove c r0\nmove d 11",
   },

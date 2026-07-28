@@ -163,6 +163,15 @@ numbering plus fixes 8 and 9, which are added optimizations).
    the function boundary into whichever caller loop enclosed the call site
    that happened to trigger lowering, `ra` still pending. Now an error;
    inlined bodies keep the caller's loop on purpose (macro semantics).
+8. *(optimization — see CLAUDE.md)*
+9. *(optimization — see CLAUDE.md)*
+10. **An inlined argument was re-evaluated at every read.** A read-only
+    parameter is bound lazily to the argument *expression*, so a body reading
+    it twice ran the argument twice: `clamp(d0.Temperature)` sampled the
+    device once for its condition and again for `return v`, and could return
+    a value above the bound it had just compared against. An argument is now
+    evaluated once, in the caller's frame, whenever the body reads it more
+    than once — which is what a real (jal) call always did.
 
 Each fix is pinned by a differential case flagged `expectOriginalDiff`, so
 the harness distinguishes it from a regression. Because the original

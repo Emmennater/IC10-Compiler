@@ -174,6 +174,22 @@ export const CASES: TestCase[] = [
     ],
   },
   {
+    // Fix 10, in the shape that shows why it is a miscompile and not just a
+    // wasted instruction. `v` is read twice - once by the condition, once by
+    // the fall-through `return v` - and as a lazy alias each read re-compiled
+    // the argument, so the original sampled d0.Temperature TWICE:
+    //
+    //   l r0 d0 Temperature   <- compared against 100
+    //   ble r0 100 endif0
+    //   move r0 100
+    //   j inline0
+    //   endif0:
+    //   l r0 d0 Temperature   <- a different reading, returned unclamped
+    //   inline0:
+    //
+    // A temperature that crosses 100 between the two reads makes `clamp`
+    // return a value above its own bound. Evaluated once, the branch and
+    // the result cannot disagree.
     name: "function-inline-single-site",
     source: [
       "fn clamp(v)",
@@ -183,6 +199,14 @@ export const CASES: TestCase[] = [
       "  return v",
       "end",
       "d0.Setting = clamp(d0.Temperature)",
+    ],
+    expectOriginalDiff: true,
+    expected: [
+      "l r0 d0 Temperature",
+      "ble r0 100 endif0",
+      "move r0 100",
+      "endif0:",
+      "s d0 Setting r0",
     ],
   },
   {

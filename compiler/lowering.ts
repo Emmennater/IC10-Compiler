@@ -46,7 +46,7 @@ import {
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
 import {
-  collectAssignedNames, countReturns, fnVarRefs, isCallOverhead,
+  collectAssignedNames, countNameReads, countReturns, fnVarRefs, isCallOverhead,
   type FnInfo, type FnTable,
 } from "./functions.ts";
 import { ConstexprEvaluator } from "./constexpr.ts";
@@ -1256,15 +1256,25 @@ class FrameLowerer {
   private inlineCall(fn: FnInfo, argNodes: Expression[], node: Range, wantValue: boolean): Operand | null {
     this.checkNotRecursive(fn, node);
 
-    // Parameters that the body reassigns must become real variables,
-    // evaluated once up front (in the caller's frame); read-only parameters
-    // stay lazy aliases carrying the caller's chain.
+    // A parameter becomes a real variable, evaluated once up front in the
+    // caller's frame, when the body reassigns it or when the body reads it
+    // more than once. The second rule is what makes a call by value: an
+    // alias re-compiles its argument at every read, so `foo(d0.Temperature)`
+    // read twice used to emit two `l` instructions and hand the body two
+    // independently sampled values (fix 10). Evaluating in the caller's
+    // frame also puts the value before the body's control flow, so it
+    // dominates every read - a value first computed inside an `if` arm
+    // could not be reused after it.
+    //
+    // A parameter read at most once keeps the lazy alias: it emits nothing
+    // when the body never reads it, and a constant argument still folds
+    // into each use rather than occupying a register.
     const callerChain = this.chain;
     const reassigned = new Set<string>();
     collectAssignedNames(fn.body, this.fnTable, reassigned);
     const paramScope: Scope = new Map();
     fn.params.forEach((param, i) => {
-      if (reassigned.has(param)) {
+      if (reassigned.has(param) || countNameReads(fn.body, param) > 1) {
         const value = this.compileExpression(argNodes[i]);
         paramScope.set(param, { kind: "var", state: { value, maybe: false, home: null } });
       } else {

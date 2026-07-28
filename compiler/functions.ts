@@ -114,6 +114,23 @@ export function collectAssignedNames(block: Statement[], fnTable: FnTable, out: 
   for (const statement of block) walk(statement);
 }
 
+/**
+ * How many times the block mentions `name` as a value. Over-approximate on
+ * purpose - it counts every identifier of that spelling `childrenOf` reaches,
+ * including a property name that happens to match - because the only caller
+ * uses it to decide whether an inlined parameter is worth evaluating up
+ * front, where guessing high costs at most one instruction.
+ */
+export function countNameReads(block: Statement[], name: string): number {
+  let count = 0;
+  const walk = (node: FormalSyntaxNode): void => {
+    if (node.type === "identifier" && node.name === name) count++;
+    for (const child of childrenOf(node)) walk(child);
+  };
+  for (const statement of block) walk(statement);
+  return count;
+}
+
 /** Number of `return` statements anywhere inside the block. */
 export function countReturns(block: Statement[]): number {
   let count = 0;
