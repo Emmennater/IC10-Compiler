@@ -1,0 +1,83 @@
+#docs-wrapper {
+  align-items: stretch;
+}
+
+.markdoc {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 32px 20vw 80px;
+  box-sizing: border-box;
+  color: var(--theme-text-element);
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+  /* Scrolls itself, rather than letting its full unclipped height overflow
+     #docs-wrapper — which would force the flex column to shrink *every*
+     child to fit, crushing the h1 down to its content floor regardless of
+     its own `height`. `min-height: 0` is what lets this shrink below its
+     natural content height in the first place; flex items default to
+     `min-height: auto` (their content size), which is exactly what caused
+     the overflow. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.markdoc h1,
+.markdoc h2,
+.markdoc h3 {
+  color: var(--theme-text-element);
+  border-bottom: 1px solid var(--theme-border);
+  padding-bottom: 6px;
+}
+
+.markdoc a {
+  color: var(--theme-variable, var(--theme-text-element));
+}
+
+.markdoc table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.markdoc th,
+.markdoc td {
+  border: 1px solid var(--theme-border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.markdoc pre {
+  background: var(--theme-background-element);
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.markdoc code {
+  font-family: monospace;
+}
+
+.markdoc :not(pre) > code {
+  background: var(--theme-background-element);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* Token classes shared with the CodeMirror editor's HighlightStyle
+   (see highlight.js) — each reads the live --theme-* custom property
+   theme.js writes onto the root, so a fence re-colors on theme switch
+   without re-rendering. */
+.tok-keyword { color: var(--theme-keyword); }
+.tok-declaration { color: var(--theme-declaration); }
+.tok-function { color: var(--theme-function); }
+.tok-number { color: var(--theme-number); }
+.tok-variable { color: var(--theme-variable); }
+.tok-string { color: var(--theme-string); }
+.tok-comment { color: var(--theme-comment); }
+.tok-operator { color: var(--theme-operator); }
+.tok-special { color: var(--theme-special); }

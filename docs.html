@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICC Documentation</title>
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/docs.css">
+</head>
+<body>
+  <script type="module" src="docs.js"></script>
+  <vbox id="docs-wrapper" class="panel">
+    <h1>
+      <span class="title"><span>ICC</span> Docs</span>
+      <span class="script-controls">
+        <a class="group-item" href="index.html" title="Open the editor">Editor</a>
+        <span class="dropdown">
+          <button id="theme-toggle" title="Change the color theme"></button>
+          <ul id="theme-list" class="dropdown-list" hidden></ul>
+        </span>
+      </span>
+    </h1>
+    <div id="docs-content" class="markdoc"></div>
+  </vbox>
+</body>
+</html>

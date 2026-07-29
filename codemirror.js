@@ -5,9 +5,8 @@ import { insertTab, indentLess, indentMore, history, historyKeymap, toggleCommen
 import { EditorState, Compartment } from "@codemirror/state";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
-import { styleTags, tags as t, Tag } from "@lezer/highlight";
-import { parser } from "./lezer/parser.js";
-import { parser as parser_ic10 } from "./lezer/parser-ic10.js";
+import { tags as t } from "@lezer/highlight";
+import { device, register, declaration, iccParser, ic10Parser } from "./highlight.js";
 import { saveScript, documentChanged } from "./save-load.js";
 import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 import { setupDropdown, dropdownItem } from "./dropdown.js";
@@ -23,10 +22,6 @@ let runCallback = () => {};
 function setRunCallback(fn) {
   runCallback = fn;
 }
-
-const device = Tag.define();
-const register = Tag.define();
-const declaration = Tag.define();
 
 const themeColors = loadTheme();
 
@@ -129,46 +124,14 @@ function highlightsFor(colors) {
 }
 
 const lang = LRLanguage.define({
-  parser: parser.configure({
-    props: [
-      styleTags({
-        "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
-        UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot": t.operator,
-        "if then elif else end loop while do repeat until break continue \
-        return At DirectiveName for in of fn": t.keyword,
-        "let const define device": declaration,
-        "Instruction FunctionName": t.function(t.variableName),
-        "Number Integer": t.number,
-        Bool: t.bool,
-        Comment: t.comment,
-        String: t.string,
-        VariableName: t.variableName,
-        Device: device
-      })
-    ]
-  }),
+  parser: iccParser,
   languageData: {
     commentTokens: { line: "#" },
   }
 });
 
 const lang_ic10 = LRLanguage.define({
-  parser: parser_ic10.configure({
-    props: [
-      styleTags({
-        "InstructionName FunctionName": t.function(t.variableName),
-        "ParenLeft ParenRight Colon Dot AddOp": t.operator,
-        "Number Integer": t.number,
-        String: t.string,
-        Channel: device,
-        DeviceName: device,
-        Register: register,
-        LabelName: t.labelName,
-        Comment: t.comment,
-        VariableName: t.variableName
-      })
-    ]
-  }),
+  parser: ic10Parser,
   languageData: {
     commentTokens: { line: "#" },
   }
