@@ -1999,7 +1999,7 @@ export const cases = {
       "endif1:",
     ],
   },
-  // const declarations
+  // Const declarations
   "a const folds exactly like a let": {
     source: "const X = 10\nc = X + 1",
     expected: "move c 11",
@@ -2323,6 +2323,123 @@ export const cases = {
       "let foo = 1",
     ],
     error: "Line 3: foo was already defined",
+  },
+  // Lists
+  "list declaration": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "db.Setting = arr[0]",
+      "arr[1] = 3",
+      "db.Setting = arr[1]",
+    ],
+    expected: [
+      "poke 510 1",
+      "poke 511 2",
+      "get r0 db 510",
+      "s db Setting r0",
+      "poke 511 3",
+      "get r0 db 511",
+      "s db Setting r0",
+    ]
+  },
+  "lists in functions": {
+    source: [
+      "let x[2] = [1, 2]",
+      "fn foo(i, j)",
+      "  let y[2] = [3, 4]",
+      "  return x[i] + y[j]",
+      "end",
+      "d0.Setting = foo(0, 1)",
+      "d1.Setting = foo(2, 3)",
+    ],
+    expected: [
+      "j ProgramStart",
+      "foo:",
+      "poke 508 3",
+      "poke 509 4",
+      "add r0 r0 510",
+      "get r0 db r0",
+      "add r1 r1 508",
+      "get r1 db r1",
+      "add r0 r0 r1",
+      "j ra",
+      "ProgramStart:",
+      "poke 510 1",
+      "poke 511 2",
+      "move r0 0",
+      "move r1 1",
+      "jal foo",
+      "s d0 Setting r0",
+      "move r0 2",
+      "move r1 3",
+      "jal foo",
+      "s d1 Setting r0",
+    ]
+  },
+  "lists scoped to functions": {
+    source: [
+      "fn foo()",
+      "  let x[1]",
+      "end",
+      "x = 1",
+    ],
+    expected: [
+      "move x 1",
+    ]
+  },
+  "iteration over a list (for loop)": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "for let i = 0, i < 2, i += 1 do",
+      "  d0.Setting = arr[i]",
+      "end",
+    ],
+    expected: [
+      "poke 510 1",
+      "poke 511 2",
+      "move r0 0",
+      "for0:",
+      "add r1 r0 510",
+      "get r1 db r1",
+      "s d0 Setting r1",
+      "add r0 r0 1",
+      "blt r0 2 for0",
+    ]
+  },
+  "iteration over a list (for in loop)": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "for let i in arr do",
+      "  d0.Setting = i",
+      "end",
+    ],
+    expected: [
+      "poke 510 1",
+      "poke 511 2",
+      "move r0 0",
+      "forin0:",
+      "s d0 Setting r0",
+      "add r0 r0 1",
+      "blt r0 2 forin0",
+    ]
+  },
+  "iteration over a list (for of loop)": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "for let x of arr do",
+      "  d0.Setting = x",
+      "end",
+    ],
+    expected: [
+      "poke 510 1",
+      "poke 511 2",
+      "move r0 510",
+      "forof0:",
+      "get r1 db r0",
+      "s d0 Setting r1",
+      "add r0 r0 1",
+      "blt r0 512 forof0",
+    ]
   }
 };
 
@@ -2348,11 +2465,52 @@ export function runCase({ source, order, inlineThreshold }) {
   }
 }
 
+/**
+ * A case's two outcomes - emitted code and a rejected program - are compared
+ * as one string so a mismatch always reads as a diff, including when a case
+ * expected an error and got code (or the other way round). The `ERROR:`
+ * prefix is what keeps those two kinds from ever comparing equal.
+ */
+export function expectedText(spec) {
+  return spec.error !== undefined ? `ERROR: ${spec.error}` : joinLines(spec.expected) ?? "";
+}
+
+/** The same reading of what a `runCase` result actually was. */
+export function actualText(result) {
+  return result instanceof CompileError ? `ERROR: ${result.message}` : result;
+}
+
 /** Whether a compiled result matches the spec's `expected` / `error`. */
 export function caseMatches(spec, actual) {
-  return actual instanceof CompileError
-    ? actual.message === spec.error
-    : actual === joinLines(spec.expected);
+  return actualText(actual) === expectedText(spec);
+}
+
+/**
+ * Line diff of two outputs, `-` expected and `+` actual, common lines kept as
+ * context. Quadratic LCS - the outputs are a handful of instructions each.
+ */
+export function diffLines(expected, actual) {
+  const want = expected.split("\n");
+  const got = actual.split("\n");
+  // common[i][j] = length of the longest common subsequence of the suffixes.
+  const common = Array.from({ length: want.length + 1 }, () => new Array(got.length + 1).fill(0));
+  for (let i = want.length - 1; i >= 0; i--) {
+    for (let j = got.length - 1; j >= 0; j--) {
+      common[i][j] = want[i] === got[j]
+        ? common[i + 1][j + 1] + 1
+        : Math.max(common[i + 1][j], common[i][j + 1]);
+    }
+  }
+  const lines = [];
+  let i = 0, j = 0;
+  while (i < want.length && j < got.length) {
+    if (want[i] === got[j]) { lines.push(`    ${want[i]}`); i++; j++; }
+    else if (common[i + 1][j] >= common[i][j + 1]) lines.push(`  - ${want[i++]}`);
+    else lines.push(`  + ${got[j++]}`);
+  }
+  while (i < want.length) lines.push(`  - ${want[i++]}`);
+  while (j < got.length) lines.push(`  + ${got[j++]}`);
+  return lines;
 }
 
 // Run standalone (`node test.mjs`); stays silent when imported by another suite.
@@ -2366,8 +2524,8 @@ if (import.meta.main) {
     } else {
       failures++;
       console.log(`FAIL ${name}`);
-      console.log(`  expected: ${JSON.stringify(spec.error ?? joinLines(spec.expected))}`);
-      console.log(`  actual:   ${JSON.stringify(actual instanceof CompileError ? actual.message : actual)}`);
+      console.log("  - expected  + actual");
+      for (const line of diffLines(expectedText(spec), actualText(actual))) console.log(line);
     }
   }
   console.log(`\n${nCases - failures}/${nCases} passed`);

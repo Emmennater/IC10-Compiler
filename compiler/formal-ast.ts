@@ -48,6 +48,8 @@ export type Statement =
   | While
   | Repeat
   | For
+  | ForIn
+  | ForOf
   | Break
   | Continue
   | Yield
@@ -157,6 +159,22 @@ export type For = Range & {
   init?: Statement;
   condition?: Expression;
   update?: Statement;
+  body: Block;
+};
+
+// for let <identifier> in <expression> do <block> end
+export type ForIn = Range & {
+  type: "forin";
+  decl: Declaration;
+  list: Identifier;
+  body: Block;
+};
+
+// for let <identifier> of <expression> do <block> end
+export type ForOf = Range & {
+  type: "forof";
+  decl: Declaration;
+  list: Identifier;
   body: Block;
 };
 
@@ -778,6 +796,36 @@ export function convertStatement(node: SyntaxNode): Statement {
       }
     }
 
+    case "ForInExpr": {
+      const decl = parts.find(c => c.type === "Declaration");
+      const list = parts.find(c => c.type === "VariableName");
+      
+      if (!decl || !list) fail("Malformed forin", node);
+      
+      return {
+        ...rangeOf(node),
+        type: "forin",
+        decl: convertStatement(decl) as Declaration,
+        list: convertIdentifier(list) as Identifier,
+        body: convertBlock(node, "do", "end"),
+      }
+    }
+
+    case "ForOfExpr": {
+      const decl = parts.find(c => c.type === "Declaration");
+      const list = parts.find(c => c.type === "VariableName");
+      
+      if (!decl || !list) fail("Malformed forin", node);
+      
+      return {
+        ...rangeOf(node),
+        type: "forof",
+        decl: convertStatement(decl) as Declaration,
+        list: convertIdentifier(list) as Identifier,
+        body: convertBlock(node, "do", "end"),
+      }
+    }
+
     case "break":
       return { type: "break", ...rangeOf(node) };
 
@@ -917,6 +965,8 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "while": return [node.condition, node.body];
     case "repeat": return [node.body, node.until];
     case "for": return [node.init, node.condition, node.update, node.body].filter(c => c !== undefined);
+    case "forin": return [node.decl, node.list, node.body];
+    case "forof": return [node.decl, node.list, node.body];
     case "break":
     case "continue":
     case "yield":

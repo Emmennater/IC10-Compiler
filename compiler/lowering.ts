@@ -31,7 +31,7 @@ import {
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
   type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
   type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
-  type StringExpr, type UnaryOp, type While, type For,
+  type StringExpr, type UnaryOp, type While, type For, type ForIn, type ForOf,
 } from "./formal-ast.ts";
 import {
   assertNever,
@@ -116,6 +116,7 @@ type Services = {
   readonly arrayTable: ArrayTable;
   /** Lowered body size under which a function is inlined at every call site. */
   readonly inlineThreshold: number;
+  stackTop: number;
 };
 
 /** The immutable context one frame lowers code in. */
@@ -162,6 +163,7 @@ export class Lowerer {
       constexpr: new ConstexprEvaluator(fnTable),
       arrayTable: new Map(),
       inlineThreshold,
+      stackTop: STACK_TOP,
     };
   }
 
@@ -423,9 +425,9 @@ class FrameLowerer {
   }
 
   private compileIndexing(node: ListIndexing): Operand {
-    const list = this.shared.arrayTable.get(node.list.name);
+    const list = this.chain.lookup(node.list.name);
     
-    if (!list) {
+    if (!list || list.kind !== "list") {
       throw this.errors.error(`List ${node.list.name} is not defined`, node);
     }
     
@@ -887,6 +889,21 @@ class FrameLowerer {
     }
   }
 
+  private demoteAssignedVars(block: Statement[], node: Range): Demoted[] {
+    const assigned = new Set<string>();
+    
+    collectAssignedNames(block, this.fnTable, assigned);
+    
+    const demoted = this.demoteVariables(assigned, node);
+    
+    for (const d of demoted) {
+      d.state.value = { kind: "vreg", id: d.state.home! };
+      d.state.maybe = d.entryMaybe || d.entryValue === null;
+    }
+
+    return demoted;
+  }
+
   // ------------------------------- if -----------------------------------
 
   /** Lower a block's statements in a frame with one fresh scope on top. */
@@ -1125,14 +1142,6 @@ class FrameLowerer {
   }
 
   private processFor(node: For): void {
-    /**
-     * A `let` in the init is scoped to the loop, so the whole construct - init,
-     * condition, body and update - is lowered one scope down.
-     */
-    this.withContext({ chain: this.chain.child() }).lowerFor(node);
-  }
-
-  private lowerFor(node: For): void {
     const condition = node.condition || { type: "constant", value: 1 } as Constant;
 
     // The init runs first, and before anything looks the loop's names up: it
@@ -1195,6 +1204,167 @@ class FrameLowerer {
     }
 
     // The body may run zero times
+    this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
+  }
+
+  private processForIn(node: ForIn): void {
+    const list = this.chain.lookup(node.list.name);
+
+    if (!list) {
+      throw this.errors.error(`List ${node.list.name} is not defined`, node.list);
+    }
+
+    if (list.kind !== "list") {
+      throw this.errors.error(`${node.list.name} is not a list`, node.list);
+    }
+
+    if (list.size === 0) return; // Empty list
+
+    node.decl.value = { type: "constant", value: 0 } as Constant;
+    this.processStatement(node.decl);
+
+    const updateNode = {
+      from: node.from,
+      to: node.to,
+      type: "assignment",
+      target: node.decl.target,
+      value: {
+        from: node.from,
+        to: node.to,
+        type: "binaryop",
+        opcode: "add",
+        left: node.decl.target,
+        right: { type: "constant", value: 1 } as Constant,
+      } as BinaryOp
+    } as Assignment;
+
+    const conditionNode = {
+      from: node.from,
+      to: node.to,
+      type: "comparisonop",
+      opcode: "lt",
+      left: node.decl.target,
+      right: { type: "constant", value: list.size } as Constant,
+    } as ComparisonOp;
+
+    const nodes = [...node.body.statements, node.decl, updateNode];
+    const demoted = this.demoteAssignedVars(nodes, node);
+    const { head, update, end } = this.labels.newForIn();
+    const body = node.body.statements;
+    const headLabelId = this.emit({ op: "label", name: head, node }).id;
+
+    // Loop body
+    this.statements.clearLoads();
+    const bodyFrom = this.ids.nextInstId;
+    this.withContext({ loop: { breakLabel: end, continueLabel: update } }).processBlockScoped(body);
+
+    // Loop back
+    this.emit({ op: "label", name: update, node });
+    this.processAssignment(updateNode);
+    this.compileCondition(conditionNode, head, true);
+    
+    const bodyTo = this.ids.nextInstId - 1;
+    const last = this.lastEmitted();
+    this.emit({ op: "label", name: end, node });
+
+    if (last) {
+      const backJumpId = last.id;
+      this.shared.loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+    }
+
+    this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
+  }
+
+  private processForOf(node: ForOf): void {
+    const list = this.chain.lookup(node.list.name);
+
+    if (!list) {
+      throw this.errors.error(`List ${node.list.name} is not defined`, node.list);
+    }
+
+    if (list.kind !== "list") {
+      throw this.errors.error(`${node.list.name} is not a list`, node.list);
+    }
+
+    if (list.size === 0) return; // Empty list
+
+    this.processStatement(node.decl);
+    
+    // The index used to iterate over the list
+    const indexVreg = this.ids.newVreg();
+    this.emit({
+      op: "movev",
+      dest: indexVreg,
+      src: { kind: "const", text: String(list.start) },
+      node: node.decl.target
+    });
+
+    const nodes = [...node.body.statements, node.decl];
+    const assigned = new Set<string>([node.decl.target.name]);
+    
+    collectAssignedNames(nodes, this.fnTable, assigned);
+    
+    const demoted = this.demoteVariables(assigned, node);
+    
+    for (const d of demoted) {
+      d.state.value = { kind: "vreg", id: d.state.home! };
+      d.state.maybe = d.entryMaybe || d.entryValue === null;
+    }
+
+    const { head, update, end } = this.labels.newForOf();
+    const body = node.body.statements;
+    const headLabelId = this.emit({ op: "label", name: head, node }).id;
+
+    // Load list element
+    const elem = this.chain.lookup(node.decl.target.name);
+
+    if (!elem) {
+      throw this.errors.error(`Element variable not found: ${node.decl.target.name}`, node.decl.target);
+    }
+
+    if (elem.kind !== "var") {
+      throw this.errors.error(`${node.decl.target.name} is not a variable`, node.decl.target);
+    }
+
+    if (elem.state.home === null) {
+      throw this.errors.error(`${node.decl.target.name} does not have a home`, node.decl.target);
+    }
+
+    // Get list element
+    this.emit({
+      op: "get",
+      dest: elem.state.home,
+      addr: { kind: "vreg", id: indexVreg },
+      node: node.decl
+    });
+
+    // The element variable has a value now
+    elem.state.maybe = false;
+
+    // Loop body
+    this.statements.clearLoads();
+    const bodyFrom = this.ids.nextInstId;
+    this.withContext({ loop: { breakLabel: end, continueLabel: update } }).processBlockScoped(body);
+
+    // Loop back
+    this.emit({ op: "label", name: update, node });
+    this.emit({ op: "alu", opcode: "add", dest: indexVreg,
+      args: [ { kind: "vreg", id: indexVreg }, { kind: "const", text: "1" } ], node
+    });
+    this.emit({ op: "branch", opcode: "blt", target: head,
+      args: [ { kind: "vreg", id: indexVreg }, { kind: "const", text: String(list.start + list.size) } ],
+      node
+    });
+    
+    const bodyTo = this.ids.nextInstId - 1;
+    const last = this.lastEmitted();
+    this.emit({ op: "label", name: end, node });
+
+    if (last) {
+      const backJumpId = last.id;
+      this.shared.loopRegions.push({ headLabelId, backJumpId, bodyFrom, bodyTo });
+    }
+
     this.finalizeDemoted(demoted, d => d.entryValue !== null && !d.entryMaybe);
   }
 
@@ -1407,7 +1577,13 @@ class FrameLowerer {
         this.processRepeat(statement);
         break;
       case "for":
-        this.processFor(statement);
+        this.withContext({ chain: this.chain.child() }).processFor(statement);
+        break;
+      case "forin":
+        this.withContext({ chain: this.chain.child() }).processForIn(statement);
+        break;
+      case "forof":
+        this.withContext({ chain: this.chain.child() }).processForOf(statement);
         break;
       case "break": {
         if (!this.cx.loop) throw this.errors.error("break outside of a loop", statement);
@@ -1531,9 +1707,9 @@ class FrameLowerer {
     }
 
     if (target.type === "listindexing") {
-      const list = this.shared.arrayTable.get(target.list.name);
+      const list = this.chain.lookup(target.list.name);
 
-      if (!list) {
+      if (!list || list.kind !== "list") {
         this.shared.errors.error(`List ${target.list.name} is not defined`, target.list);
         return;
       }
@@ -1636,6 +1812,12 @@ class FrameLowerer {
     const name = statement.name.name;
     const list = statement.list ? statement.list.elements : [];
     
+    // Check if the list is already defined
+    const existing = this.chain.lookup(name);
+    if (existing && existing.kind === "list") {
+      throw this.errors.error(`List ${name} is already defined`, statement);
+    }
+
     // Determine list size
     const sizeOp = this.fold(statement.size);
     if (!sizeOp) throw this.errors.error("List size must be constant", statement.size);
@@ -1643,14 +1825,11 @@ class FrameLowerer {
     if (!Number.isInteger(size)) throw this.errors.error("List size must be an integer", statement.size);
 
     // Calculate the next available stack address
-    const arrayDecls = this.shared.arrayTable.values();
-    let baseAddr = STACK_TOP;
-    for (const decl of arrayDecls) {
-      baseAddr -= decl.size;
-    }
+    let baseAddr = this.shared.stackTop;
+    this.shared.stackTop -= size;
 
     const start = baseAddr - size + 1;
-    this.shared.arrayTable.set(name, { start, size });
+    this.chain.declare(name, { kind: "list", start, size });
     this.emit({ op: "reserve", name, size, node: statement });
 
     for (let i = 0; i < list.length; i++) {

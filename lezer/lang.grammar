@@ -13,13 +13,9 @@ block { statement* }
 statement {
   Declaration | ArrayDeclaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
   kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
-  FunctionDef | Return | PreprocessorDirective | ForExpr
+  FunctionDef | Return | PreprocessorDirective | ForExpr | ForInExpr | ForOfExpr
 }
 
-// `const` differs from `let` only in that reassignment is an error; both
-// bind a compile-time name. (A `define` is the tunable one - it emits an
-// IC10 define line and is never folded, so a player can edit the value in
-// the chip.)
 Declaration {
   (kw<"let"> | kw<"const">) VariableName
   (Assign expression)?
@@ -51,6 +47,10 @@ WhileExpr { kw<"while"> expression kw<"do"> block kw<"end"> }
 RepeatUntilExpr { kw<"repeat"> block kw<"until"> expression }
 
 ForExpr { kw<"for"> statement? Comma expression? Comma statement? kw<"do"> block kw<"end"> }
+
+ForInExpr { kw<"for"> Declaration kw<"in"> VariableName kw<"do"> block kw<"end"> }
+
+ForOfExpr { kw<"for"> Declaration kw<"of"> VariableName kw<"do"> block kw<"end"> }
 
 Instruction { kw_<"yield"> | kw_<"sleep"> expression }
 

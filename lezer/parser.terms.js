@@ -73,4 +73,8 @@ export const
   At = 71,
   DirectiveName = 72,
   ForExpr = 73,
-  _for = 74
+  _for = 74,
+  ForInExpr = 75,
+  _in = 76,
+  ForOfExpr = 77,
+  of = 78

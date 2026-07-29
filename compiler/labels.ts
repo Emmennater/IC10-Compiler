@@ -66,6 +66,16 @@ export class LabelFactory {
     return { head: `for${i}`, update: `updatefor${i}`, end: `endfor${i}` };
   }
 
+  newForIn(): { head: string, update: string; end: string } {
+    const i = this.forCount++;
+    return { head: `forin${i}`, update: `updateforin${i}`, end: `endforin${i}` };
+  }
+
+  newForOf(): { head: string, update: string; end: string } {
+    const i = this.forCount++;
+    return { head: `forof${i}`, update: `updateforof${i}`, end: `endforof${i}` };
+  }
+
   /** Join point for a short-circuited `&&` / `||` in a condition. */
   newShortCircuit(): string {
     return `sc${this.shortCircuitCount++}`;

@@ -29,7 +29,17 @@ import type {
 } from "../compiler/formal-ast.ts";
 import { node, num } from "./ast.ts";
 
-export type UnitResult = { name: string; pass: boolean; detail?: string };
+/**
+ * `pass` is the verdict; `detail` explains it in one line. A result from
+ * `equal` also carries the two operands in `comparison`, so a runner with a
+ * diff engine (the vitest wrapper) can show one instead of the flat string.
+ */
+export type UnitResult = {
+  name: string;
+  pass: boolean;
+  detail?: string;
+  comparison?: { actual: unknown; expected: unknown };
+};
 
 const results: UnitResult[] = [];
 
@@ -40,6 +50,7 @@ function check(label: string, condition: boolean, detail?: string): void {
 function equal<T>(label: string, actual: T, expected: T): void {
   const same = JSON.stringify(actual) === JSON.stringify(expected);
   check(label, same, same ? undefined : `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  if (!same) results[results.length - 1].comparison = { actual, expected };
 }
 
 function throws(label: string, body: () => unknown): void {

@@ -55,7 +55,10 @@ describe("differential suite", () => {
         refactoredAst, config);
 
       if (testCase.expectOriginalDiff) {
-        expect(r).not.toBe(o);
+        expect(
+          r,
+          "case is flagged expectOriginalDiff but the refactor matched the pristine original",
+        ).not.toBe(o);
         // The oracle disagrees here by design, so it cannot check the rest of
         // the output. A golden is mandatory or the case degrades to the
         // substring list the moment someone flags it.
@@ -64,15 +67,16 @@ describe("differential suite", () => {
           "a case flagged expectOriginalDiff must pin its full output with `expected`",
         ).toBeDefined();
       } else {
-        expect(r).toBe(o);
+        // Diff reads `-` pristine original, `+` refactor.
+        expect(r, "refactor output differs from the pristine original").toBe(o);
       }
 
       if (testCase.expected !== undefined) {
-        expect(r).toBe(joinLines(testCase.expected));
+        expect(r, "output differs from the case's pinned golden").toBe(joinLines(testCase.expected));
       }
 
       for (const substring of testCase.expect ?? []) {
-        expect(r).toContain(substring);
+        expect(r, `output is missing an expected substring, in full:\n${r}`).toContain(substring);
       }
     });
   }

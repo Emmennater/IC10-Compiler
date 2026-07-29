@@ -37,7 +37,9 @@ export type Sym =
   | { kind: "define"; text: string; needsLine: boolean }
   // A read-only parameter of an inlined function: each use re-compiles the
   // argument expression in the caller's chain (textual inlining)
-  | { kind: "alias"; argNode: Expression; callerChain: ScopeChain };
+  | { kind: "alias"; argNode: Expression; callerChain: ScopeChain }
+  // Array declarations
+  | { kind: "list"; start: number; size: number };
 
 export type Scope = Map<string, Sym>;
 
@@ -98,12 +100,10 @@ export class ScopeChain {
   lookup(name: string): Sym | null {
     for (let i = this.scopes.length - 1; i >= 0; i--) {
       const symbol = this.scopes[i].get(name);
-      if (symbol) {
-        if ((symbol.kind === "var" || symbol.kind === "alias") && i < this.base && i !== 0) {
-          return null;
-        }
-        return symbol;
-      }
+      if (!symbol) continue;
+      // If the symbol is at least one level above this scope, but not global, skip it
+      if (i < this.base && i !== 0) return null;
+      return symbol;
     }
     return null;
   }

@@ -66,6 +66,7 @@ export const STATEMENT_TYPES: ReadonlySet<string> = new Set([
   "Declaration", "Assignment", "IfExpr", "LoopExpr", "WhileExpr", "RepeatUntilExpr",
   "break", "continue", "Instruction", "FunctionCall", "DeviceDeclaration", "Definition",
   "FunctionDef", "Return", "PreprocessorDirective", "ArrayDeclaration", "ForExpr",
+  "ForInExpr", "ForOfExpr",
 ]);
 
 /** Children minus comments, which are skipped tokens attachable anywhere. */
