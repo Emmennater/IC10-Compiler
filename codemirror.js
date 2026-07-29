@@ -17,7 +17,7 @@ let x = a + b
 let y = x * 2
 c = y - x`.slice(1);
 
-// Set by main.js; invoked on Mod-Enter and on every document change.
+// Set by main.js; invoked on Mod-Enter and by the Run button.
 let runCallback = () => {};
 
 function setRunCallback(fn) {
@@ -189,6 +189,41 @@ const ext = [
   })
 ];
 
+// Keeps the caret at least three lines clear of the top and bottom edges.
+//
+// Reading layout (`coordsAtPos`) straight from an update listener would drag
+// CodeMirror's already-scheduled measure pass into the keystroke: by the time
+// listeners run the view is Idle again with a measure pending, so
+// `readMeasured` calls `measure()` on the spot — and the `scrollTop` write
+// then invalidates what that pass just computed. As a measure request the
+// read lands in the measure phase and the scroll in the write phase, on the
+// frame that was already going to run. Reusing one object also lets
+// `requestMeasure` drop duplicates, so a burst of movement scrolls once.
+const caretMargin = {
+  read(view) {
+    const coords = view.coordsAtPos(view.state.selection.main.head);
+    if (!coords) return 0;
+
+    const margin = 3 * view.defaultLineHeight;
+    const rect = view.scrollDOM.getBoundingClientRect();
+
+    let delta = 0;
+
+    if (coords.top < rect.top + margin) {
+      delta += coords.top - (rect.top + margin);
+    }
+
+    if (coords.bottom > rect.bottom - margin) {
+      delta += coords.bottom - (rect.bottom - margin);
+    }
+
+    return delta;
+  },
+  write(delta, view) {
+    if (delta) view.scrollDOM.scrollTop += delta;
+  }
+};
+
 const keymapExtensions = [
   history(),
   indentUnit.of("  "),
@@ -322,30 +357,7 @@ const keymapExtensions = [
       return;
     }
 
-    const view = update.view;
-    const margin = 3 * view.defaultLineHeight;
-
-    const pos = update.state.selection.main.head;
-    const coords = view.coordsAtPos(pos);
-    if (!coords) return;
-
-    const scroller = view.scrollDOM;
-    const rect = scroller.getBoundingClientRect();
-
-    if (coords.top < rect.top + margin) {
-      scroller.scrollTop -= (rect.top + margin) - coords.top;
-    }
-
-    if (coords.bottom > rect.bottom - margin) {
-      scroller.scrollTop += coords.bottom - (rect.bottom - margin);
-    }
-  }),
-  EditorView.updateListener.of(update => {
-    const view = update.view;
-    const hasSelection = !view.state.selection.main.empty;
-    const isFocused = view.hasFocus;
-    const hideActiveLine = hasSelection || !isFocused;
-    view.dom.classList.toggle("cm-hide-active-line", hideActiveLine);
+    update.view.requestMeasure(caretMargin);
   })
 ];
 
