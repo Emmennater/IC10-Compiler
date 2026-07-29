@@ -187,8 +187,12 @@ document.querySelector("#script-delete").addEventListener("click", () => {
   delete scripts[savedName];
   writeScripts(scripts);
   
-  if (Object.keys(scripts).length === 0) newScript();
-  else loadScript(Object.keys(scripts)[0]);
+  if (Object.keys(scripts).length === 0) {
+    newScript();
+  } else {
+    loadScript(Object.keys(scripts)[0]);
+    runCurrentScript();
+  }
 });
 
 document.querySelector("#copy-output").addEventListener("click", () => {

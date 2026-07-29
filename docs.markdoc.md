@@ -83,7 +83,7 @@ Four things in that program are worth naming up front, because they cover most o
 
 ## Program structure
 
-A program is a list of statements, one per line. There are no semicolons and no braces — blocks are opened by a keyword and closed by `end`. Indentation is for you, not the compiler.
+A program is a list of statements, which don't need to be on separate lines. There are no semicolons and no braces — blocks are opened by a keyword and closed by `end`. Indentation is for you, not the compiler.
 
 Comments start with `#` and run to the end of the line.
 
@@ -102,7 +102,7 @@ ICC has four ways to introduce a name, and they compile to very different things
 | `let x = 1` | compile time, until it needs a register | usually nothing | no |
 | `const X = 1` | compile time only | nothing | no |
 | `define X = 1` | runtime, as an IC10 `define` | one line | **yes** |
-| `device p = d0` | runtime, as an IC10 `alias` | one line | no |
+| `device p = d0` | runtime, as an IC10 `alias` | one line | **yes** (change device pin) |
 
 ### `let` — variables
 
@@ -653,7 +653,7 @@ let unused = d0.Setting + 1
 
 ## Errors
 
-Every diagnostic carries the line it came from. The common ones:
+Every diagnostic carries the line it came from (starting at 0). The common ones:
 
 | Message | Cause |
 | --- | --- |

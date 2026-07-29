@@ -178,7 +178,7 @@
 /* The output half of an `error=true` fence: the compiler's own message, so
    it reads as a diagnostic rather than as more code to copy. */
 .markdoc .code-group .code-error {
-  color: var(--theme-string, var(--theme-text-element));
+  color: var(--theme-comment, var(--theme-text-element));
   white-space: pre-wrap;
 }
 
@@ -190,6 +190,16 @@
   font-style: italic;
   color: var(--theme-comment, var(--theme-text-element));
   background: var(--theme-background-element);
+}
+
+/* Space between two code groups */
+.markdoc .code-group + .code-group {
+  margin-top: 16px;
+}
+
+/* Space between table and code group */
+.markdoc table + .code-group {
+  margin-top: 24px;
 }
 
 /* {% callout %} — an aside pulled out of the prose flow. The left border

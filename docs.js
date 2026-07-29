@@ -76,7 +76,7 @@ const fence = {
     if (message !== undefined) {
       return new Markdoc.Tag("div", { class: "code-group" }, [
         labeledCodeBlock(code, language, "ICC", attributes),
-        labeledCodeBlock(message, "", "Error", { class: "code-error" })
+        labeledCodeBlock(`# ${message}`, "", "Error", { class: "code-error" })
       ]);
     }
 
