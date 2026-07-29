@@ -1,6 +1,6 @@
 // Shared Lezer highlighting setup for both the ICC and IC10 grammars. This is
 // the single source of truth for "which grammar node maps to which token
-// class" — codemirror.js feeds these configured parsers straight to
+// class" - codemirror.js feeds these configured parsers straight to
 // CodeMirror's LRLanguage, and docs.js calls highlightSegments to color code
 // fences in the rendered documentation, so the two surfaces cannot drift.
 

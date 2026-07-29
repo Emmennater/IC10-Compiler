@@ -17,7 +17,7 @@ device sensor = d0
 device vent = d1
 
 if sensor.Temperature > 20c then
-    vent.On = 1
+  vent.On = 1
 end
 ```
 
@@ -65,12 +65,12 @@ device vent = d1
 define TargetTemp = 20c
 
 loop
-    if sensor.Temperature > TargetTemp then
-        vent.On = 1
-    else
-        vent.On = 0
-    end
-    yield
+  if sensor.Temperature > TargetTemp then
+    vent.On = 1
+  else
+    vent.On = 0
+  end
+  yield
 end
 ```
 
@@ -89,7 +89,7 @@ Comments start with `#` and run to the end of the line.
 
 ```icc {% compile=true %}
 # A comment runs to the end of the line
-device pump = d0     # trailing comments work too
+device pump = d0   # trailing comments work too
 pump.On = 1
 ```
 
@@ -128,7 +128,7 @@ The same check runs across branches. If a variable is assigned on only *some* pa
 ```icc {% error=true %}
 let x
 if d0.On then
-    x = 1
+  x = 1
 end
 d1.Setting = x
 ```
@@ -158,7 +158,7 @@ Use `const` for anything derived at compile time — array sizes, thresholds you
 
 ### `define` — knobs you can edit on the chip
 
-A `define` is the one declaration that survives into the emitted program *as a name*. It emits an IC10 `define` line, and every use refers to the name rather than the number, so you can retune it in-game with the chip's editor and never recompile.
+A `define` is a declaration that survives into the emitted program *as a name*. It emits an IC10 `define` line, and every use refers to the name rather than the number, so you can retune it in-game with the chip's editor and never recompile.
 
 ```icc {% compile=true %}
 define Pressure = 50
@@ -196,7 +196,7 @@ device pump = d0
 pump.On = 1
 ```
 
-The right-hand side must be a physical device pin: `d0` through `d5`, or `db` (the chip's own housing). An unused `device` declaration emits nothing, so there is no cost to naming pins you end up not using.
+The right-hand side must be a physical device pin: `d0` through `d5`, or `db` (the chip's own housing). An unused `device` declaration emits nothing, so there is no cost to naming pins you end up not using. It is safe to change these after the script has been compiled.
 
 ### Placeholders
 
@@ -276,19 +276,19 @@ d2.Setting = 2 & 4
 
 Tightest first. Precedence follows C, which means the comparisons bind **tighter** than the bitwise operators — `a & 1 == 1` parses as `a & (1 == 1)`. Parenthesize when that isn't what you meant.
 
-| | |
+| Operator | Definition |
 | --- | --- |
 | `f(…)` `x[…]` `x.y` | call, index, property |
 | `-` `!` `~` | unary |
-| `*` `/` `%` | |
-| `+` `-` | |
-| `<<` `>>` `>>>` | |
-| `==` `!=` `<` `<=` `>` `>=` | |
-| `&` | |
-| `^` | |
-| `\|` | |
-| `&&` | |
-| `\|\|` | loosest |
+| `*` `/` `%` | multiplicative |
+| `+` `-` | additive |
+| `<<` `>>` `>>>` | shift |
+| `==` `!=` `<` `<=` `>` `>=` | comparison |
+| `&` | and |
+| `^` | exclusive or |
+| `\|` | or |
+| `&&` | logical and |
+| `\|\|` | logical or |
 
 ### Compound assignment
 
@@ -316,11 +316,11 @@ pump.Setting += 1
 ```icc {% compile=true %}
 device sensor = d0
 if sensor.Pressure > 100 then
-    d1.On = 1
+  d1.On = 1
 elif sensor.Pressure > 50 then
-    d1.On = 0
+  d1.On = 0
 else
-    d1.Setting = 0
+  d1.Setting = 0
 end
 ```
 
@@ -332,8 +332,8 @@ An unconditional loop. Leave it with `break`.
 
 ```icc {% compile=true %}
 loop
-    d0.Setting = d1.Temperature
-    yield
+  d0.Setting = d1.Temperature
+  yield
 end
 ```
 
@@ -344,8 +344,8 @@ Tests before each iteration, so the body may run zero times.
 ```icc {% compile=true %}
 device tank = d0
 while tank.Pressure < 100 do
-    d1.On = 1
-    yield
+  d1.On = 1
+  yield
 end
 d1.On = 0
 ```
@@ -357,8 +357,8 @@ Tests *after* each iteration, so the body always runs at least once. Note there 
 ```icc {% compile=true %}
 device tank = d0
 repeat
-    d1.On = 1
-    yield
+  d1.On = 1
+  yield
 until tank.Pressure >= 100
 ```
 
@@ -368,8 +368,8 @@ The header is three comma-separated slots — initializer, condition, update —
 
 ```icc {% compile=true %}
 for let i = 0, i < 6, i += 1 do
-    d0.Setting = i
-    yield
+  d0.Setting = i
+  yield
 end
 ```
 
@@ -385,14 +385,14 @@ The loop variable is scoped to the loop. After the `end` it is out of scope, and
 
 ```icc {% compile=true %}
 loop
-    yield
-    if d0.Temperature < 300 then
-        continue
-    end
-    if d0.Pressure > 200 then
-        break
-    end
-    d1.On = 1
+  yield
+  if d0.Temperature < 300 then
+    continue
+  end
+  if d0.Pressure > 200 then
+    break
+  end
+  d1.On = 1
 end
 ```
 
@@ -404,8 +404,8 @@ Both fuse into the surrounding structure where they can. Neither `if` above surv
 
 ```icc {% compile=true %}
 loop
-    sleep 2
-    d0.On = 1
+  sleep 2
+  d0.On = 1
 end
 ```
 
@@ -495,16 +495,16 @@ Indexing takes any expression, and a constant offset in the index folds into the
 ```icc {% compile=true %}
 let arr[3] = [5, 6, 7]
 for let i in arr do
-    d0.Setting = i
-    yield
+  d0.Setting = i
+  yield
 end
 ```
 
 ```icc {% compile=true %}
 let arr[3] = [5, 6, 7]
 for let v of arr do
-    d0.Setting = v
-    yield
+  d0.Setting = v
+  yield
 end
 ```
 
@@ -518,7 +518,7 @@ Functions are declared with `fn`, take positional parameters, and return a value
 
 ```icc {% compile=true %}
 fn hypot(a, b)
-    return sqrt(a * a + b * b)
+  return sqrt(a * a + b * b)
 end
 
 d0.Setting = hypot(d1.Setting, d2.Setting)
@@ -538,7 +538,7 @@ A one-instruction body inlines at both sites, leaving nothing to jump to:
 
 ```icc {% compile=true %}
 fn double(v)
-    return v * 2
+  return v * 2
 end
 d0.Setting = double(d0.Temperature)
 d1.Setting = double(d1.Temperature)
@@ -548,9 +548,9 @@ A bigger body stays a real function, and is emitted once no matter how many time
 
 ```icc {% compile=true %}
 fn clamp(v, lo, hi)
-    if v < lo then return lo end
-    if v > hi then return hi end
-    return v
+  if v < lo then return lo end
+  if v > hi then return hi end
+  return v
 end
 
 d0.Setting = clamp(d1.Temperature, 273, 373)
@@ -565,8 +565,8 @@ A recursive call needs a stack frame per call, which would collide with the fixe
 
 ```icc {% error=true %}
 fn fact(n)
-    if n < 2 then return 1 end
-    return n * fact(n - 1)
+  if n < 2 then return 1 end
+  return n * fact(n - 1)
 end
 d0.Setting = fact(5)
 ```
@@ -578,11 +578,11 @@ Mark a function `@constexpr` and, whenever every argument is a compile-time cons
 ```icc {% compile=true %}
 @constexpr
 fn fib(n)
-    if n < 2 then
-        return n
-    else
-        return fib(n - 1) + fib(n - 2)
-    end
+  if n < 2 then
+    return n
+  else
+    return fib(n - 1) + fib(n - 2)
+  end
 end
 
 d0.Setting = fib(10)

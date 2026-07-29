@@ -157,7 +157,7 @@ const ext = [
 // Reading layout (`coordsAtPos`) straight from an update listener would drag
 // CodeMirror's already-scheduled measure pass into the keystroke: by the time
 // listeners run the view is Idle again with a measure pending, so
-// `readMeasured` calls `measure()` on the spot — and the `scrollTop` write
+// `readMeasured` calls `measure()` on the spot - and the `scrollTop` write
 // then invalidates what that pass just computed. As a measure request the
 // read lands in the measure phase and the scroll in the write phase, on the
 // frame that was already going to run. Reusing one object also lets

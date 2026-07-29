@@ -2,12 +2,12 @@
 //
 // Every ```icc fence in docs.markdoc.md tagged `compile` or `error` claims
 // something about the compiler, and the docs page checks that claim while
-// rendering — but only when a browser loads it, which is exactly when a stale
+// rendering - but only when a browser loads it, which is exactly when a stale
 // example is most expensive to discover. This runs the same check, through
 // the same `runDocExample`, with no DOM involved.
 //
 // It is a *consistency* suite rather than a behavioral one: it pins no output
-// of its own, because the fences do not either — a compiled fence renders
+// of its own, because the fences do not either - a compiled fence renders
 // whatever the compiler emits. What it catches is a language or compiler
 // change that makes a documented program stop compiling, or makes a
 // documented error message stop being an error. Pinning the IC10 text here

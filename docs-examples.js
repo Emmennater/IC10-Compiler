@@ -3,7 +3,7 @@
 // Every ```icc fence in docs.markdoc.md tagged `compile` or `error` is a
 // claim about the compiler: that this source produces that IC10, or that it
 // is rejected with that message. `runDocExample` is what checks the claim,
-// and it is deliberately the *only* place that does — docs.js calls it while
+// and it is deliberately the *only* place that does - docs.js calls it while
 // rendering the page (so a broken example breaks the page loudly instead of
 // leaving a stale claim standing on it) and tests/docs.test.mjs calls it over
 // the same fences without a browser. Two callers, one assertion: the suite
@@ -22,7 +22,7 @@ export const DOCS_FILE = "docs.markdoc.md";
 /**
  * The fence attributes that turn a code block into a claim. Spelled once so
  * the schema in docs.js, the extractor below, and this module's reader agree
- * on what an example even is — the failure mode being an extractor that
+ * on what an example even is - the failure mode being an extractor that
  * quietly matches nothing and a suite that passes vacuously.
  */
 export const EXAMPLE_ATTRIBUTES = ["compile", "error", "removeLabels"];
@@ -36,7 +36,7 @@ export function locationOf(lines) {
  * Compile one example and hold it to what its fence claims.
  *
  * Returns `{ ic10 }` for a `compile` fence and `{ message }` for an `error`
- * one. Throws when the compiler disagrees with the fence — a `compile`
+ * one. Throws when the compiler disagrees with the fence - a `compile`
  * example that fails, or an `error` example that compiles cleanly. A
  * non-CompileError is a fault in the compiler rather than in the example, so
  * it propagates untouched rather than being reported as a bad example.

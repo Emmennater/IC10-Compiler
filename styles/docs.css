@@ -47,6 +47,12 @@
   color: var(--theme-text-element);
 }
 
+#docs-toc a.active {
+  background: var(--theme-background-element);
+  color: var(--theme-variable, var(--theme-text-element));
+  font-weight: 600;
+}
+
 #docs-toc .toc-level-3 a {
   padding-left: 24px;
   font-size: 13px;
@@ -62,7 +68,7 @@
   font-family: system-ui, sans-serif;
   line-height: 1.6;
   /* Scrolls itself, rather than letting its full unclipped height overflow
-     #docs-wrapper — which would force the flex column to shrink *every*
+     #docs-wrapper - which would force the flex column to shrink *every*
      child to fit, crushing the h1 down to its content floor regardless of
      its own `height`. `min-height: 0` is what lets this shrink below its
      natural content height in the first place; flex items default to
@@ -135,6 +141,10 @@
 }
 
 .markdoc .code-group .code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 4px 16px;
   font-size: 14px;
   font-weight: 600;
@@ -145,8 +155,46 @@
   opacity: 0.75;
 }
 
+.markdoc .code-block-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The clipboard glyph (assets/clipboard-icon.svg) is applied as a mask
+   rather than inlined as SVG markup, so its fill tracks currentColor
+   instead of the stroke color baked into the source file - see the
+   --copy-icon-url custom property docs.js sets once at load. */
+.markdoc .copy-button {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background-color: var(--theme-text-element);
+  cursor: pointer;
+  mask-image: var(--copy-icon-url);
+  -webkit-mask-image: var(--copy-icon-url);
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  -webkit-mask-position: center;
+  filter: brightness(0.8);
+}
+
+.markdoc .copy-button:hover {
+  filter: brightness(1.2);
+}
+
+.markdoc .copy-button.copied {
+  filter: brightness(0.6);
+}
+
 /* The IC10 block is a <summary>, which the browser natively toggles its
-   <details> parent's open/collapsed state on click — no JS involved. Only
+   <details> parent's open/collapsed state on click - no JS involved. Only
    the marker styling below is custom; the expand/collapse behavior itself
    is free. */
 .markdoc .code-group summary.code-block-header {
@@ -159,14 +207,19 @@
   display: none;
 }
 
-.markdoc .code-group summary.code-block-header::before {
+/* The marker lives on the label, not the header: the header is now a
+   space-between flex row with the copy button as its other item, and a
+   header-level ::before would float as a third item at the far left, torn
+   away from the label text it's meant to sit against. */
+.markdoc .code-group summary.code-block-header .code-block-label::before {
   content: "▸";
   display: inline-block;
   width: 1.2em;
 }
 
-.markdoc .code-group details[open] summary.code-block-header::before {
+.markdoc .code-group details[open] summary.code-block-header .code-block-label::before {
   transform: rotate(90deg) translateX(0.2em) translateY(0.15em);
+  display: inline-block;
 }
 
 .markdoc .code-group pre {
@@ -178,17 +231,17 @@
 /* The output half of an `error=true` fence: the compiler's own message, so
    it reads as a diagnostic rather than as more code to copy. */
 .markdoc .code-group .code-error {
-  color: var(--theme-comment, var(--theme-text-element));
+  color: var(--theme-text-muted, var(--theme-text-element));
   white-space: pre-wrap;
 }
 
 /* Stands in for the output half when a fence compiles to no instructions at
-   all — dead code elimination is a documented outcome, not a missing block. */
+   all - dead code elimination is a documented outcome, not a missing block. */
 .markdoc .code-group .code-empty {
   padding: 8px 16px;
   font-size: 15px;
   font-style: italic;
-  color: var(--theme-comment, var(--theme-text-element));
+  color: var(--theme-text-muted, var(--theme-text-element));
   background: var(--theme-background-element);
 }
 
@@ -202,7 +255,7 @@
   margin-top: 24px;
 }
 
-/* {% callout %} — an aside pulled out of the prose flow. The left border
+/* {% callout %} - an aside pulled out of the prose flow. The left border
    carries the type; everything else matches the surrounding text. */
 .markdoc .callout {
   border-left: 4px solid var(--theme-border);
@@ -226,7 +279,7 @@
 }
 
 /* Token classes shared with the CodeMirror editor's HighlightStyle
-   (see highlight.js) — each reads the live --theme-* custom property
+   (see highlight.js) - each reads the live --theme-* custom property
    theme.js writes onto the root, so a fence re-colors on theme switch
    without re-rendering. */
 .tok-keyword { color: var(--theme-keyword); }
