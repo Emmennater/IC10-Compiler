@@ -2,13 +2,14 @@
 import { EditorView, lineNumbers, highlightActiveLine,
   highlightActiveLineGutter, keymap } from "@codemirror/view";
 import { insertTab, indentLess, indentMore, history, historyKeymap, toggleComment } from "@codemirror/commands";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
 import { styleTags, tags as t, Tag } from "@lezer/highlight";
 import { parser } from "./lezer/parser.js";
 import { parser as parser_ic10 } from "./lezer/parser-ic10.js";
 import { saveScript, documentChanged } from "./save-load.js";
+import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 
 const initialText = `
 let x = a + b
@@ -24,12 +25,19 @@ function setRunCallback(fn) {
 
 const device = Tag.define();
 const register = Tag.define();
+const declaration = Tag.define();
+
+const themeColors = loadTheme();
+
+// Element colors are read live from the css root, so only the token colors
+// baked into the HighlightStyle have to be rebuilt when the theme changes.
+const highlightStyle = new Compartment();
 
 const theme = EditorView.theme({
   // The main editor container
   "&": {
-    color: "#e0e0e0",
-    backgroundColor: "#282C34",
+    color: "var(--theme-text-element)",
+    backgroundColor: "var(--theme-background)",
     width: "100%",
     height: "100%",
     padding: "0px",
@@ -51,11 +59,11 @@ const theme = EditorView.theme({
   },
   // The background area containing line numbers
   ".cm-gutters": {
-    backgroundColor: "#282C34",
-    color: "#858585",
+    backgroundColor: "var(--theme-background)",
+    color: "var(--theme-line-number)",
     border: "none",
     padding: "0px",
-    borderRight: "2px solid #535964",
+    borderRight: "2px solid var(--theme-border)",
     userSelect: "none",
   },
   // Line number gutter
@@ -75,8 +83,8 @@ const theme = EditorView.theme({
     backgroundColor: "#ffffff11"
   },
   "& .cm-activeLineGutter": {
-    color: "#b7b7b7",
-    backgroundColor: "#363b45"
+    color: "var(--theme-text-element)",
+    backgroundColor: "var(--theme-background-element)"
   },
   // Hide active line
   "&.cm-hide-active-line .cm-activeLine": {
@@ -102,19 +110,22 @@ const theme = EditorView.theme({
   ".cm-inline-error-msg": {
     color: "#ff0000",
   }
-})
+});
 
-const highlights = HighlightStyle.define([
-  { tag: device, color: '#75e6d7' },
-  { tag: register, color: '#75e6d7' },
-  { tag: t.keyword, color: "#ff7b72" },
-  { tag: t.comment, color: "#8b949e" },
-  { tag: [t.string, t.special(t.string)], color: "#a5d6ff" },
-  { tag: [t.number, t.bool], color: "#ffa657" },
-  { tag: [t.variableName], color: "#79c0ff" },
-  { tag: [t.function(t.variableName), t.labelName], color: "#d2a8ff" },
-  { tag: t.operator, color: "#7d91a8" },
-]);
+function highlightsFor(colors) {
+  return syntaxHighlighting(HighlightStyle.define([
+    { tag: device, color: colors.special },
+    { tag: register, color: colors.special },
+    { tag: declaration, color: colors.declaration },
+    { tag: t.keyword, color: colors.keyword },
+    { tag: t.comment, color: colors.comment },
+    { tag: [t.string, t.special(t.string)], color: colors.string },
+    { tag: [t.number, t.bool], color: colors.number },
+    { tag: [t.variableName], color: colors.variable },
+    { tag: [t.function(t.variableName), t.labelName], color: colors.function },
+    { tag: t.operator, color: colors.operator },
+  ]));
+}
 
 const lang = LRLanguage.define({
   parser: parser.configure({
@@ -122,8 +133,9 @@ const lang = LRLanguage.define({
       styleTags({
         "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
         UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot": t.operator,
-        "let if then elif else end loop while do repeat until break continue define device \
-        fn return At DirectiveName for const in of": t.keyword,
+        "if then elif else end loop while do repeat until break continue \
+        return At DirectiveName for in of fn": t.keyword,
+        "let const define device": declaration,
         "Instruction FunctionName": t.function(t.variableName),
         "Number Integer": t.number,
         Bool: t.bool,
@@ -163,7 +175,7 @@ const lang_ic10 = LRLanguage.define({
 
 const ext = [
   theme,
-  syntaxHighlighting(highlights),
+  highlightStyle.of(highlightsFor(themeColors)),
   lineNumbers({ formatNumber: n => n - 1 }),
   highlightActiveLine(),
   highlightActiveLineGutter(),
@@ -224,6 +236,11 @@ const keymapExtensions = [
 
         // If the line ends with "then", "do", or "else", indent one more level
         if (/\b(?:then|do|else|loop|repeat)\s*$/.test(beforeCursor)) {
+          indent += "  ";
+        }
+
+        // If the line starts with "fn", ident one more level
+        if (/^\s*fn\s/.test(beforeCursor)) {
           indent += "  ";
         }
 
@@ -352,7 +369,26 @@ const output = new EditorView({
   parent: document.querySelector('#output')
 });
 
+function setTheme(name) {
+  const effects = highlightStyle.reconfigure(highlightsFor(applyTheme(name)));
+  editor.dispatch({ effects });
+  output.dispatch({ effects });
+}
+
 export function initListeners() {
+  // Theme switching
+  const themeSelect = document.querySelector("#theme-select");
+
+  for (const name of themeNames) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    themeSelect.appendChild(option);
+  }
+
+  themeSelect.value = themeName();
+  themeSelect.addEventListener("change", () => setTheme(themeSelect.value));
+
   // Editor scrolling
   const scrollerEditor = editor.scrollDOM;
 

@@ -1260,7 +1260,7 @@ class FrameLowerer {
 
     // Loop back
     this.emit({ op: "label", name: update, node });
-    this.processAssignment(updateNode);
+    this.processAssignment(updateNode, true);
     this.compileCondition(conditionNode, head, true);
     
     const bodyTo = this.ids.nextInstId - 1;
@@ -1671,7 +1671,8 @@ class FrameLowerer {
     this.emit({ op: "alias", name, device: pin, node: statement });
   }
 
-  private processAssignment(statement: Assignment | CompoundAssignOp): void {
+  private processAssignment(statement: Assignment | CompoundAssignOp, constSafe = false): void {
+    /** constSafe exists to allow for in loops to declare a constant loop index */
     const target = statement.target;
 
     // `x += e` reads as `x = x + e`. Handing a synthesized BinaryOp to the
@@ -1694,7 +1695,7 @@ class FrameLowerer {
       if (symbol && symbol.kind !== "var") {
         throw this.errors.error(`Cannot assign to ${target.name}`, target);
       }
-      if (symbol?.constant) {
+      if (symbol?.constant && !constSafe) {
         throw this.errors.error(`Cannot assign to constant ${target.name}`, target);
       }
       if (symbol) {

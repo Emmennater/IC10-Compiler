@@ -12,32 +12,33 @@ h1 {
   align-items: center;
   justify-content: space-between;
   height: 40px;
-  background: #282C34;
+  background: var(--theme-background);
   margin: 0px;
   width: 100%;
   font-family: monospace;
   font-weight: normal;
-  color: #858585;
-  border-bottom: 1px solid #535964;
+  color: var(--theme-text-element);
+  border-bottom: 1px solid var(--theme-border);
   user-select: none;
 }
 
 .title {
   margin-left: 10px;
+  color: var(--theme-line-number);
 }
 
 .title span {
-  color: #ff7b72;
+  color: var(--theme-keyword);
 }
 
 .title.ic10 {
-  color: #D2A8FF;
+  color: var(--theme-function);
 }
 
 #stats {
   margin-left: 12px;
   font-size: 14px;
-  color: #858585;
+  color: var(--theme-text-element);
 }
 
 #stats.over-limit {
@@ -45,7 +46,7 @@ h1 {
 }
 
 #saved-icon {
-  color: #b7b9ba;
+  color: var(--theme-text-element);
 }
 
 .script-controls {
@@ -58,9 +59,9 @@ h1 {
 
 .script-controls select,
 .script-controls button {
-  background: #363b45;
-  color: #e0e0e0;
-  border: 1px solid #535964;
+  background: var(--theme-background-element);
+  color: var(--theme-text-element);
+  border: 1px solid var(--theme-border);
   border-radius: 3px;
   font-family: monospace;
   font-size: 16px;
@@ -71,7 +72,8 @@ h1 {
 
 .script-controls select:hover,
 .script-controls button:hover {
-  background: #414855;
+  /* background: #414855; */
+  filter: brightness(1.2);
 }
 
 .panel {
@@ -86,7 +88,7 @@ h1 {
 
 #ic10-wrapper {
   flex: 0.7;
-  border-left: 1px solid #535964;
+  border-left: 1px solid var(--theme-border);
 }
 
 hbox {
