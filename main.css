@@ -1,3 +1,9 @@
+:root {
+  --grad: radial-gradient(circle at top, #bfeaff, 10%, #95dafd, 50%, #64b7ff);
+  --grad-feint: radial-gradient(circle at top, #bfeaff22, 10%, #95dafd22, 50%, #64b7ff22);
+  --grad-feinter: radial-gradient(circle at top, #bfeaff11, 10%, #95dafd11, 50%, #64b7ff11);
+}
+
 html, body {
   display: flex;
   margin: 0;
@@ -11,7 +17,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
+  height: 52px;
   background: var(--theme-background);
   margin: 0px;
   width: 100%;
@@ -23,7 +29,7 @@ h1 {
 }
 
 .title {
-  margin-left: 10px;
+  margin-left: 20px;
   color: var(--theme-line-number);
 }
 
@@ -46,34 +52,189 @@ h1 {
 }
 
 #saved-icon {
-  color: var(--theme-text-element);
+  font-size: 24px;
+  line-height: 1;
+  color: #3fb950;
+}
+
+#saved-icon.unsaved {
+  color: #d29922;
 }
 
 .script-controls {
   right: 8px;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   margin-right: 10px;
 }
 
-.script-controls select,
-.script-controls button {
+.script-controls button,
+.script-controls input {
   background: var(--theme-background-element);
   color: var(--theme-text-element);
   border: 1px solid var(--theme-border);
-  border-radius: 3px;
+  border-radius: 8px;
   font-family: monospace;
-  font-size: 16px;
-  padding: 3px 8px;
+  font-size: 24px;
+  padding: 2px 8px;
   cursor: pointer;
   max-width: 30vw;
 }
 
-.script-controls select:hover,
 .script-controls button:hover {
   /* background: #414855; */
   filter: brightness(1.2);
+}
+
+.script-controls button:active {
+  filter: none;
+}
+
+/* Anchors a .dropdown-list under whatever opens it */
+.dropdown {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.script-name-group > .group-item {
+  border-radius: 0;
+  border-left-width: 0;
+  margin: 0;
+}
+
+#script-name {
+  max-width: 20ch;
+  min-width: 5ch;
+  width: auto;
+  border-radius: 8px 0 0 8px;
+  border-left-width: 1px;
+  cursor: text;
+  outline: none;
+}
+
+#script-name:focus {
+  border-color: var(--theme-variable, var(--theme-text-element));
+}
+
+#script-list-toggle,
+#script-new,
+#script-delete {
+  padding: 0;
+  width: 32px;
+  text-align: center;
+  line-height: 1;
+}
+
+#script-delete {
+  border-radius: 0 8px 8px 0;
+}
+
+/* Saved-script and theme dropdowns */
+.dropdown-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--theme-background-element);
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  font-family: monospace;
+  font-size: 24px;
+  color: var(--theme-text-element);
+  z-index: 10;
+}
+
+.dropdown-list[hidden] {
+  display: none;
+}
+
+.dropdown-list li {
+  padding: 3px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dropdown-list li:hover {
+  background: #fff2;
+}
+
+.dropdown-list li.current {
+  color: var(--theme-keyword);
+}
+
+.dropdown-list li.empty {
+  color: var(--theme-line-number);
+  font-style: italic;
+  cursor: default;
+}
+
+.dropdown-list li.empty:hover {
+  background: none;
+}
+
+/* The theme menu sits near the right edge, so it hangs off its right side */
+#theme-list {
+  left: auto;
+  right: 0;
+}
+
+/* The Run button is the one that does something to the world */
+#script-run {
+  display: flex;
+  justify-content: center;
+  /* padding: 1px 10px; */
+  font-size: 24px;
+  font-weight: bold;
+  background: #79c0ff18;
+  /* border: solid 2px #79c0ff88; */
+  border-radius: 8px;
+  color: #79c0ff;
+  cursor: pointer;
+
+  position: relative;
+  border: none;
+  padding: 3px 14px;
+  background-image: var(--grad-feinter)
+}
+
+#script-run:hover {
+  background-image: var(--grad-feint);
+  filter: none;
+}
+
+#script-run:active {
+  filter: brightness(0.8);
+}
+
+#script-run::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: var(--grad);
+  -webkit-mask:
+    radial-gradient(#fff 0 0) content-box,
+    radial-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+#script-run > span {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .panel {

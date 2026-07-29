@@ -14,12 +14,16 @@
         <span class="title"><span>Compiler</span> // v3.0</span>
         <span class="script-controls">
           <span id="saved-icon"></span>
-          <select id="script-select" title="Load a saved script"></select>
-          <button id="script-rename" title="Rename this script">Rename</button>
+          <span class="script-name-group dropdown">
+            <input id="script-name" class="group-item" type="text" spellcheck="false"
+                   autocomplete="off" title="Script name — type here to rename">
+            <button id="script-list-toggle" class="group-item" title="Load a saved script">▾</button>
+            <button id="script-new" class="group-item" title="Start a new script">+</button>
+            <button id="script-delete" class="group-item" title="Delete this script">−</button>
+            <ul id="script-list" class="dropdown-list" hidden></ul>
+          </span>
           <button id="script-save" title="Save this script in the browser">Save</button>
-          <button id="script-new" title="Start a new script">New</button>
-          <button id="script-delete" title="Delete the selected script">Delete</button>
-          <button id="script-run" title="Run the script">Run</button>
+          <button id="script-run" title="Run the script (Ctrl+Enter)"><span>Run</span></button>
         </span>
       </h1>
       <div id="editor" class="editor"></div>
@@ -29,7 +33,10 @@
         <span class="title ic10">IC10</span>
         <span id="stats"></span>
         <span class="script-controls">
-          <select id="theme-select" title="Change the color theme"></select>
+          <span class="dropdown">
+            <button id="theme-toggle" title="Change the color theme"></button>
+            <ul id="theme-list" class="dropdown-list" hidden></ul>
+          </span>
           <button id="copy-output" title="Copy the output to the clipboard">Copy</button>
         </span>
       </h1>  

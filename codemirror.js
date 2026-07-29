@@ -10,6 +10,7 @@ import { parser } from "./lezer/parser.js";
 import { parser as parser_ic10 } from "./lezer/parser-ic10.js";
 import { saveScript, documentChanged } from "./save-load.js";
 import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
+import { setupDropdown, dropdownItem } from "./dropdown.js";
 
 const initialText = `
 let x = a + b
@@ -377,17 +378,25 @@ function setTheme(name) {
 
 export function initListeners() {
   // Theme switching
-  const themeSelect = document.querySelector("#theme-select");
+  const themeToggle = document.querySelector("#theme-toggle");
+  const themeList = document.querySelector("#theme-list");
 
-  for (const name of themeNames) {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    themeSelect.appendChild(option);
-  }
+  const showTheme = () => { themeToggle.textContent = `${themeName()} ▾`; };
 
-  themeSelect.value = themeName();
-  themeSelect.addEventListener("change", () => setTheme(themeSelect.value));
+  const menu = setupDropdown(themeToggle, themeList, () => {
+    themeList.innerHTML = "";
+    const current = themeName();
+
+    for (const name of themeNames) {
+      themeList.appendChild(dropdownItem(name, name === current, () => {
+        menu.close();
+        setTheme(name);
+        showTheme();
+      }));
+    }
+  });
+
+  showTheme();
 
   // Editor scrolling
   const scrollerEditor = editor.scrollDOM;
