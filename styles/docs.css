@@ -175,6 +175,40 @@
   margin: 0;
 }
 
+/* The output half of an `error=true` fence: the compiler's own message, so
+   it reads as a diagnostic rather than as more code to copy. */
+.markdoc .code-group .code-error {
+  color: var(--theme-string, var(--theme-text-element));
+  white-space: pre-wrap;
+}
+
+/* Stands in for the output half when a fence compiles to no instructions at
+   all — dead code elimination is a documented outcome, not a missing block. */
+.markdoc .code-group .code-empty {
+  padding: 8px 16px;
+  font-size: 15px;
+  font-style: italic;
+  color: var(--theme-comment, var(--theme-text-element));
+  background: var(--theme-background-element);
+}
+
+/* {% callout %} — an aside pulled out of the prose flow. The left border
+   carries the type; everything else matches the surrounding text. */
+.markdoc .callout {
+  border-left: 4px solid var(--theme-border);
+  border-radius: 0 8px 8px 0;
+  background: var(--theme-background-element);
+  padding: 4px 20px;
+  margin: 20px 0;
+}
+
+.markdoc .callout-note { border-left-color: var(--theme-variable, var(--theme-border)); }
+.markdoc .callout-warn { border-left-color: var(--theme-number, var(--theme-border)); }
+
+.markdoc .callout p { font-size: 18px; }
+.markdoc .callout > :first-child { margin-top: 8px; }
+.markdoc .callout > :last-child { margin-bottom: 8px; }
+
 .markdoc :not(pre) > code {
   background: var(--theme-background-element);
   border-radius: 4px;

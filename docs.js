@@ -26,6 +26,12 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
   return new Markdoc.Tag(collapsible ? "details" : "div", { class: "code-block" }, [header, pre]);
 }
 
+// Where a fence sits in docs.markdoc.md, for the error messages below — a
+// build that breaks on example 40-something is only useful if it says which.
+function fenceLocation(node) {
+  return node.lines.length ? ` (docs.markdoc.md:${node.lines[0] + 1})` : "";
+}
+
 // Overrides the built-in fence node: same attributes and `<pre>` wrapper,
 // but the code is split into highlighted `<span>`s (via the Lezer grammars
 // in highlight.js) instead of one escaped text node. `node.attributes.content`
@@ -33,48 +39,87 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
 // carries a single "text" child too, which is what the default fence schema
 // falls back to and is exactly the unhighlighted text this replaces.
 //
-// A fence tagged ```icc {% compile=true %} is additionally run through the
-// real compiler — the same `compile(getAST(...))` call main.js makes — and
-// followed by its IC10 output. That's the only way the "compiles to" example
-// can't drift from what the compiler actually emits: a compile error here
-// throws, which breaks the docs page instead of leaving stale output on it.
+// Three flavors, and the two interesting ones are both *assertions* — the
+// only way documented output can't drift from what the compiler really does:
+//
+//   ```icc                      plain, highlighted only
+//   ```icc {% compile=true %}   compiled; the IC10 output follows it
+//   ```icc {% error=true %}     compiled expecting rejection; the message follows
+//
+// Each throws when the compiler disagrees with the fence — a `compile` example
+// that fails, or an `error` example that succeeds — which breaks the docs page
+// loudly instead of leaving a stale claim standing on it.
+//
+// `removeLabels` resolves labels to absolute line numbers, as the editor's
+// export does. It defaults off here because `j loop0` teaches what `j 7`
+// doesn't; examples about the final chip-ready form turn it on.
 const fence = {
   ...Markdoc.nodes.fence,
   attributes: {
     ...Markdoc.nodes.fence.attributes,
-    compile: { type: Boolean, render: false, default: false }
+    compile: { type: Boolean, render: false, default: false },
+    error: { type: Boolean, render: false, default: false },
+    removeLabels: { type: Boolean, render: false, default: false }
   },
   transform(node, config) {
     const attributes = node.transformAttributes(config);
     const code = node.attributes.content;
     const language = node.attributes.language;
+    const { compile: wantCompile, error: wantError, removeLabels } = node.attributes;
 
-    if (!node.attributes.compile) return codeBlock(code, language, attributes);
+    if (!wantCompile && !wantError) return codeBlock(code, language, attributes);
 
-    let ic10;
+    let ic10 = null;
+    let message = null;
     try {
-      ic10 = compile(getAST(code), { removeLabels: true });
+      ic10 = compile(getAST(code), { removeLabels });
     } catch (e) {
-      const where = node.lines.length ? ` (docs.markdoc.md:${node.lines[0] + 1})` : "";
-      throw new Error(`Doc example failed to compile${where}: ${e instanceof CompileError ? e.message : e}`);
+      if (!(e instanceof CompileError)) throw e;
+      message = e.message;
+    }
+
+    if (wantError) {
+      if (message === null) {
+        throw new Error(`Doc example expected a compile error${fenceLocation(node)} but compiled cleanly`);
+      }
+      return new Markdoc.Tag("div", { class: "code-group" }, [
+        labeledCodeBlock(code, language, "ICC", attributes),
+        labeledCodeBlock(message, "", "Error", { class: "code-error" })
+      ]);
+    }
+
+    if (message !== null) {
+      throw new Error(`Doc example failed to compile${fenceLocation(node)}: ${message}`);
     }
 
     return new Markdoc.Tag("div", { class: "code-group" }, [
       labeledCodeBlock(code, language, "ICC", attributes),
-      labeledCodeBlock(ic10, "ic10", "IC10", undefined, true)
+      // An example that compiles to nothing has no output block to expand;
+      // saying so beats an empty <pre> the reader can't tell from a bug.
+      ic10 === ""
+        ? new Markdoc.Tag("div", { class: "code-block code-empty" }, ["Compiles to nothing"])
+        : labeledCodeBlock(ic10, "ic10", "IC10", undefined, true)
     ]);
   }
 };
 
-// Overrides the built-in link node so every markdown link opens in a new
-// tab: `rel="noopener noreferrer"` because `target="_blank"` otherwise
-// hands the new page an unguarded `window.opener` back into this one.
+// Overrides the built-in link node so every link that leaves the page opens
+// in a new tab: `rel="noopener noreferrer"` because `target="_blank"`
+// otherwise hands the new page an unguarded `window.opener` back into this
+// one. A `#anchor` is excluded — it points at a heading on this very page,
+// and opening a second copy of the docs to reach it is not what the reader
+// asked for.
 const link = {
   ...Markdoc.nodes.link,
   transform(node, config) {
     const attributes = node.transformAttributes(config);
     const children = node.transformChildren(config);
-    return new Markdoc.Tag("a", { ...attributes, target: "_blank", rel: "noopener noreferrer" }, children);
+    const external = !String(attributes.href ?? "").startsWith("#");
+    return new Markdoc.Tag(
+      "a",
+      external ? { ...attributes, target: "_blank", rel: "noopener noreferrer" } : attributes,
+      children
+    );
   }
 };
 
@@ -91,9 +136,23 @@ const tok = {
   }
 };
 
+// `{% callout type="warn" %} … {% /callout %}` — an aside the reader should
+// not scroll past. `type` only picks a color class (see .callout in docs.css);
+// the title is the prose's job, so nothing here invents one.
+const callout = {
+  render: "div",
+  attributes: {
+    type: { type: String, default: "note", matches: ["note", "warn"], render: false }
+  },
+  transform(node, config) {
+    const children = node.transformChildren(config);
+    return new Markdoc.Tag("div", { class: `callout callout-${node.attributes.type}` }, children);
+  }
+};
+
 function renderDocs() {
   const ast = Markdoc.parse(docsSource);
-  const content = Markdoc.transform(ast, { nodes: { fence, link }, tags: { tok } });
+  const content = Markdoc.transform(ast, { nodes: { fence, link }, tags: { tok, callout } });
   document.querySelector("#docs-content").innerHTML = Markdoc.renderers.html(content);
 }
 
