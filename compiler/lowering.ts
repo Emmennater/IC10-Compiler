@@ -1462,9 +1462,13 @@ class FrameLowerer {
 
     const last = fn.body[fn.body.length - 1];
     if (last?.type === "return" && countReturns(fn.body) === 1) {
-      // Single trailing return: the result is just an operand
+      // Single trailing return: the result is just an operand. Compiled
+      // unconditionally - the expression may itself be a call with side
+      // effects (`return helper(y)`), which must run even when the caller
+      // discards wrapper's result.
       for (const statement of fn.body.slice(0, -1)) inlined.processStatement(statement);
-      return wantValue ? inlined.compileExpression(last.value) : null;
+      const value = inlined.compileExpression(last.value);
+      return wantValue ? value : null;
     }
 
     const home = this.ids.newVreg();

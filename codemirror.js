@@ -12,9 +12,20 @@ import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 import { setupDropdown, dropdownItem } from "./dropdown.js";
 
 const initialText = `
-let x = a + b
-let y = x * 2
-c = y - x`.slice(1);
+define ac = "StructureAirConditioner"
+define wallHeater = "StructureWallHeater"
+define liquidHeater = "StructureLiquidPipeHeater"
+define liquidAnalyzer = "StructureLiquidPipeAnalyzer"
+define liquidValve = "StructureWaterDigitalValve"
+define temp = 30c
+
+loop
+  yield
+  wallHeater.On = Average(ac.TemperatureInput) < Average(ac.Setting) - 2
+  liquidHeater.On = Average(liquidAnalyzer.Temperature) < temp
+  liquidValve.On = Average(liquidAnalyzer.Temperature) > temp - 2
+end
+`.slice(1);
 
 // Set by main.js; invoked on Mod-Enter and by the Run button.
 let runCallback = () => {};
