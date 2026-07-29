@@ -187,7 +187,7 @@ npm test            # vitest: units + differential + language-case suites
 npm run dev          # vite dev server for the manual test-string page (index.html/main.js)
 ```
 
-`npm test` runs four suites:
+`npm test` runs five suites:
 
 1. **122 unit tests** (`tests/units.test.ts`) over the leaf libraries - no
    AST, no `compile()`.
@@ -207,5 +207,11 @@ npm run dev          # vite dev server for the manual test-string page (index.ht
 4. **43 formal-AST cases** (`tests/formal-ast.test.ts`) - source strings
    through `getAST` → `getFormalAST`, asserting the typed tree's shape. It
    touches no part of the compile pipeline.
+5. **The documentation's own examples** (`tests/docs.test.mjs`) - every
+   `` ```icc `` fence in `docs.markdoc.md` tagged `compile` or `error`, run
+   through the same `runDocExample` the docs page renders with. A
+   consistency suite, not a behavioral one: it pins no output of its own, and
+   catches a change that makes a documented program stop compiling or a
+   documented error stop being an error.
 
 r16 (sp) and r17 (ra) are reserved for stack and function support.

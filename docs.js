@@ -3,8 +3,7 @@ import docsSource from "./docs.markdoc.md?raw";
 import { highlightSegments } from "./highlight.js";
 import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 import { setupDropdown, dropdownItem } from "./dropdown.js";
-import { compile, CompileError } from "./compiler/index.ts";
-import { getAST } from "./compiler/ast.ts";
+import { runDocExample, locationOf } from "./docs-examples.js";
 
 loadTheme();
 
@@ -26,12 +25,6 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
   return new Markdoc.Tag(collapsible ? "details" : "div", { class: "code-block" }, [header, pre]);
 }
 
-// Where a fence sits in docs.markdoc.md, for the error messages below — a
-// build that breaks on example 40-something is only useful if it says which.
-function fenceLocation(node) {
-  return node.lines.length ? ` (docs.markdoc.md:${node.lines[0] + 1})` : "";
-}
-
 // Overrides the built-in fence node: same attributes and `<pre>` wrapper,
 // but the code is split into highlighted `<span>`s (via the Lezer grammars
 // in highlight.js) instead of one escaped text node. `node.attributes.content`
@@ -48,7 +41,10 @@ function fenceLocation(node) {
 //
 // Each throws when the compiler disagrees with the fence — a `compile` example
 // that fails, or an `error` example that succeeds — which breaks the docs page
-// loudly instead of leaving a stale claim standing on it.
+// loudly instead of leaving a stale claim standing on it. That check lives in
+// runDocExample (docs-examples.js) rather than here, so tests/docs.test.mjs
+// can hold the same fences to the same claim without rendering a page; this
+// transform only decides what the result *looks* like.
 //
 // `removeLabels` resolves labels to absolute line numbers, as the editor's
 // export does. It defaults off here because `j loop0` teaches what `j 7`
@@ -69,27 +65,19 @@ const fence = {
 
     if (!wantCompile && !wantError) return codeBlock(code, language, attributes);
 
-    let ic10 = null;
-    let message = null;
-    try {
-      ic10 = compile(getAST(code), { removeLabels });
-    } catch (e) {
-      if (!(e instanceof CompileError)) throw e;
-      message = e.message;
-    }
+    const { ic10, message } = runDocExample({
+      code,
+      compile: wantCompile,
+      error: wantError,
+      removeLabels,
+      where: locationOf(node.lines)
+    });
 
-    if (wantError) {
-      if (message === null) {
-        throw new Error(`Doc example expected a compile error${fenceLocation(node)} but compiled cleanly`);
-      }
+    if (message !== undefined) {
       return new Markdoc.Tag("div", { class: "code-group" }, [
         labeledCodeBlock(code, language, "ICC", attributes),
         labeledCodeBlock(message, "", "Error", { class: "code-error" })
       ]);
-    }
-
-    if (message !== null) {
-      throw new Error(`Doc example failed to compile${fenceLocation(node)}: ${message}`);
     }
 
     return new Markdoc.Tag("div", { class: "code-group" }, [
