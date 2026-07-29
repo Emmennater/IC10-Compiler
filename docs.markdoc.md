@@ -2,42 +2,48 @@
 title: Stationeers-ICC Documentation!
 ---
 
-# ICC
+# Stationeers-ICC
 
-ICC compiles to **IC10**, the assembly language Stationeers' in-game chips
-run. The source and compiled output below are colored by the same Lezer
-grammars that drive the live [editor](index.html) — `lang.grammar` for ICC,
-`ic10.grammar` for IC10.
+ICC is a custom programming language that compiles to [IC10](https://stationeers-wiki.com/IC10), the in-game scripting language for [Stationeers](https://store.steampowered.com/app/544550/Stationeers/).
 
 ## Legend
 
-- {% tok kind="keyword" %}keyword{% /tok %} — `if`, `while`, `fn`, `return`, …
-- {% tok kind="declaration" %}declaration{% /tok %} — `let`, `const`, `define`, `device`
-- {% tok kind="variable" %}variable{% /tok %} — a variable name
-- {% tok kind="function" %}function{% /tok %} — a function or instruction name
-- {% tok kind="number" %}number{% /tok %} — a numeric literal
-- {% tok kind="string" %}string{% /tok %} — a string literal
-- {% tok kind="comment" %}comment{% /tok %} — a `#` comment
-- {% tok kind="operator" %}operator{% /tok %} — `+`, `-`, `==`, …
-- {% tok kind="special" %}special{% /tok %} — a device (`d0`) or register (`r0`)
+{% table %}
+* Token
+* Description
+---
+* {% tok kind="keyword" %}Keyword{% /tok %}
+* `if`, `while`, `fn`, `return`, …
+---
+* {% tok kind="declaration" %}Declaration{% /tok %}
+* `let`, `const`, `define`, `device`
+---
+* {% tok kind="variable" %}Variable{% /tok %}
+* A variable name
+---
+* {% tok kind="function" %}Function{% /tok %}
+* A function or instruction name
+---
+* {% tok kind="number" %}Number{% /tok %}
+* A numeric literal
+---
+* {% tok kind="string" %}String{% /tok %}
+* A string literal
+---
+* {% tok kind="comment" %}Comment{% /tok %}
+* A `#` comment
+---
+* {% tok kind="operator" %}Operator{% /tok %}
+* `+`, `-`, `==`, …
+---
+* {% tok kind="special" %}Special{% /tok %}
+* A device (`d0`) or register (`r0`)
+{% /table %}
 
 ## Example
 
-ICC source:
-
-```icc
+```icc {% compile=true %}
 let x = a + b
 let y = x * 2
 c = y - x
-```
-
-compiles to:
-
-```ic10
-move r0 a
-move r1 b
-add r0 r0 r1
-mul r1 r0 2
-sub r0 r1 r0
-move c r0
 ```

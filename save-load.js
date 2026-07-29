@@ -17,6 +17,7 @@ const savedIcon = document.querySelector("#saved-icon");
 let currentScript = "";
 let savedName = "";
 let savedStatus = false;
+let runCurrentScript = () => {};
 
 function readScripts() {
   try {
@@ -68,6 +69,7 @@ function refreshScriptList() {
     listBox.appendChild(dropdownItem(name, name === savedName, () => {
       scriptMenu.close();
       loadScript(name);
+      runCurrentScript();
     }));
   }
 }
@@ -216,5 +218,6 @@ export function setup(run) {
 
   refreshScriptList();
   setRunCallback(run);
+  runCurrentScript = run;
   run();
 }

@@ -1,6 +1,6 @@
 
 const themes = {
-  "default": {
+  "Default": {
     // Text
     "declaration": "#ff7b72",
     "keyword": "#ff7b72",
@@ -18,7 +18,7 @@ const themes = {
     "text-element": "#c9d1d9",
     "line-number": "#858585"
   },
-  "dark+": {
+  "Dark+": {
     // Text
     "declaration": "#569CD6",
     "keyword": "#C586C0",
@@ -36,10 +36,10 @@ const themes = {
     "text-element": "#c9d1d9",
     "line-number": "#858585"
   }
-}
+};
 
 const THEME_KEY = "ic10-theme";
-const DEFAULT_THEME = "dark+";
+const DEFAULT_THEME = "Dark+";
 
 export const themeNames = Object.keys(themes);
 

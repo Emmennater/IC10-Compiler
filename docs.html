@@ -12,7 +12,7 @@
   <script type="module" src="docs.js"></script>
   <vbox id="docs-wrapper" class="panel">
     <h1>
-      <span class="title"><span>ICC</span> Docs</span>
+      <span class="title">ICC <span>Docs</span></span>
       <span class="script-controls">
         <a class="group-item" href="index.html" title="Open the editor">Editor</a>
         <span class="dropdown">
@@ -21,7 +21,10 @@
         </span>
       </span>
     </h1>
-    <div id="docs-content" class="markdoc"></div>
+    <hbox id="docs-body">
+      <nav id="docs-toc"></nav>
+      <div id="docs-content" class="markdoc"></div>
+    </hbox>
   </vbox>
 </body>
 </html>

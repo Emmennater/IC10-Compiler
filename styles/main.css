@@ -33,12 +33,14 @@ h1 {
 .title {
   margin-left: 20px;
   margin-right: 10px;
-  color: var(--theme-line-number);
+  color: var(--theme-keyword);
   white-space: nowrap;
+  font-weight: bold;
 }
 
 .title span {
-  color: var(--theme-keyword);
+  color: var(--theme-line-number);
+  font-weight: normal;
 }
 
 .title.ic10 {
