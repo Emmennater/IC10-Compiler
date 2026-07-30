@@ -16,7 +16,7 @@ import {
   assertNever, destOf, setDest, usesOf,
   type IdAllocator, type Inst, type Operand,
 } from "./ir.ts";
-import { INVERT_BRANCH, STACK_TOP } from "./tables.ts";
+import { INVERT_BRANCH, SELF_DEVICE, STACK_TOP } from "./tables.ts";
 import { convergeLiveness } from "./liveness.ts";
 import { removeJumpsToNext, collectGarbageLabels } from "./optimize.ts";
 
@@ -142,7 +142,7 @@ function hoistStores(program: Inst[]): Inst[] {
       const barrier =
         other.op === "storename" || other.op === "loadname" || other.op === "call" ||
         other.op === "alias" || other.op === "definedef" ||
-        other.op === "poke" || other.op === "get" ||
+        other.op === "put" || other.op === "get" ||
         other.op === "label" || other.op === "jump" || other.op === "branch" ||
         other.op === "jal" || other.op === "ret" ||
         destOf(other) === value;
@@ -169,7 +169,7 @@ function replaceUses(inst: Inst, victim: number, replacement: number): Inst {
     case "movev":
     case "storename":
       return { ...inst, src: replace(inst.src) };
-    case "poke":
+    case "put":
       return { ...inst, addr: replace(inst.addr), src: replace(inst.src) };
     case "get":
       return { ...inst, addr: replace(inst.addr) };
@@ -223,14 +223,14 @@ function spill(
     scratch.add(s);
     // Reload before the instruction; all operands of one instruction share it
     if (uses) {
-      rewritten.push({ op: "get", dest: s, addr: addrOp, node: inst.node, id: ids.newInstId() });
+      rewritten.push({ op: "get", dest: s, device: SELF_DEVICE, addr: addrOp, node: inst.node, id: ids.newInstId() });
     }
     const copy = replaceUses(inst, victim, s);
     if (defines) setDest(copy, s);
     rewritten.push(copy);
     // Store the freshly defined value back to its stack slot
     if (defines) {
-      rewritten.push({ op: "poke", addr: addrOp, src: { kind: "vreg", id: s }, node: inst.node, id: ids.newInstId() });
+      rewritten.push({ op: "put", device: SELF_DEVICE, addr: addrOp, src: { kind: "vreg", id: s }, node: inst.node, id: ids.newInstId() });
     }
   }
   return rewritten;

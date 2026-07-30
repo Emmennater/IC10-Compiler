@@ -510,6 +510,79 @@ end
 
 Neither form needs the length written out — it comes from the declaration.
 
+## Stack variables
+
+`stack` declares a single cell of stack memory instead of a whole block — the one-element case of a list, read and written by name rather than by index.
+
+```icc {% compile=true %}
+stack idle = 0
+idle = idle + 1
+d0.Setting = idle
+```
+
+A `let` is a compile-time name that usually costs no instructions at all, so prefer it. What `stack` buys you is an address: a cell another chip can read, which is what `import` is for.
+
+## Imports
+
+Chips can share values. `import` names something another program declared and lets you use it as if it were yours.
+
+Say one chip runs this program:
+
+```icc
+# ExampleFileA
+stack idle = false
+const size = 2
+let arr[size] = [1, 2]
+```
+
+Another chip, with that one wired to its `d0` pin, can reach all three:
+
+```icc
+# ExampleFileB
+import idle from "ExampleFileA" using d0
+import arr from "ExampleFileA" using d0
+import size from "ExampleFileA"
+
+d1.Setting = idle
+d2.Setting = arr[0]
+d3.Setting = size
+```
+
+```ic10
+get r0 d0 511
+s d1 Setting r0
+get r0 d0 509
+s d2 Setting r0
+s d3 Setting 2
+```
+
+The two forms differ in what they need, and which one applies follows from what the module declared:
+
+- **Stack memory** — a `stack` variable or a list — lives on the chip running that module, so reading it takes a device. `using d0` says which pin this chip sees that chip on. Its addresses are the module's; nothing is reserved locally, so the importing program's own lists and spills are unaffected.
+- **A `const`** is a compile-time value. Importing one substitutes the value, reads no device, and emits nothing — `size` above became the literal `2`.
+
+Imported stack memory is writable, and a write goes to the other chip:
+
+```icc
+# ExampleFileB
+import idle from "ExampleFileA" using d0
+idle = 1
+```
+
+```ic10
+put d0 511 1
+```
+
+{% callout type="warning" %}
+Addresses are worked out by reading the module's declarations, in order, so the two programs must agree about them: **recompile the importing program whenever the module's `stack`, list, or `const` declarations change.** Inserting a `stack` line at the top of a module moves everything below it.
+{% /callout %}
+
+Some things deliberately cannot cross a module boundary:
+
+- **A `let`** is not importable. It lives in the module's registers, not at an address.
+- **Stack memory declared outside the top level** makes the whole module unimportable. A list inside a function body is allocated once per lowering of that body, which depends on where the module calls it, so the address is not something an importer can predict — it is rejected rather than guessed at.
+- **A module's own imports are not re-exported.** Only what a module declares itself can be imported from it.
+
 ## Functions
 
 ### Defining and calling
@@ -668,6 +741,12 @@ Every diagnostic carries the line it came from (starting at 0). The common ones:
 | `x is a variable, not a device or define` | using a `let` name as a device |
 | `List size must be constant` | a list sized by a `define` or a runtime value |
 | `List x is not defined` | indexing something that isn't a list |
+| `x is a list; read one element (x[0])` | using a list name as a value |
+| `Cannot find module "p"` | an `import` whose file the editor could not read |
+| `x is not declared in "p"` | importing a name the module does not declare itself |
+| `x lives in "p"'s stack memory; …` | an `import` of stack memory with no `using` |
+| `x is a constant in "p"; …` | an `import` of a `const` with a `using` |
+| `stack memory declared outside the top level cannot be imported` | the module allocates cells inside a function or block |
 | `Recursive functions are not supported: f` | direct or mutual recursion |
 | `f expects N arguments` | wrong argument count |
 | `Functions must be defined at the top level` | an `fn` nested inside a block |
@@ -679,7 +758,7 @@ Every diagnostic carries the line it came from (starting at 0). The common ones:
 
 ### Keywords
 
-`let` `const` `define` `device` `fn` `return` `if` `then` `elif` `else` `end` `loop` `while` `do` `repeat` `until` `for` `in` `of` `break` `continue` `yield` `sleep` `true` `false` `d0`–`d5` `db` `@constexpr`
+`let` `const` `define` `device` `stack` `import` `from` `using` `fn` `return` `if` `then` `elif` `else` `end` `loop` `while` `do` `repeat` `until` `for` `in` `of` `break` `continue` `yield` `sleep` `true` `false` `d0`–`d5` `db` `@constexpr`
 
 These are reserved and cannot be used as names.
 
@@ -690,6 +769,9 @@ These are reserved and cannot be used as names.
 | `let x` / `let x = e` | variable |
 | `const X = e` | compile-time constant |
 | `let a[n]` / `let a[n] = [e, …]` | list |
+| `stack x` / `stack x = e` | one cell of stack memory |
+| `import x from "p"` | another module's `const` |
+| `import x from "p" using d0` | another module's stack memory |
 | `define X = e` | in-chip define |
 | `device p = d0` | device alias |
 | `x = e` / `x op= e` | assignment |

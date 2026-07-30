@@ -2440,7 +2440,192 @@ export const cases = {
       "add r0 r0 1",
       "blt r0 512 forof0",
     ]
-  }
+  },
+  // Stack variables
+  "a stack variable is one reserved cell, read and written by name": {
+    source: [
+      "stack idle = 0",
+      "idle = idle + 1",
+      "d0.Setting = idle",
+    ],
+    expected: [
+      "poke 511 0",
+      "get r0 db 511",
+      "add r0 r0 1",
+      "poke 511 r0",
+      "get r0 db 511",
+      "s d0 Setting r0",
+    ]
+  },
+  "a stack variable may be declared without a value": {
+    source: [
+      "stack idle",
+      "idle = 1",
+    ],
+    expected: "poke 511 1",
+  },
+  "stack variables and lists share the address space, in declaration order": {
+    source: [
+      "stack idle = 1",
+      "let arr[2] = [2, 3]",
+      "stack busy = 4",
+    ],
+    expected: [
+      "poke 511 1",
+      "poke 509 2",
+      "poke 510 3",
+      "poke 508 4",
+    ]
+  },
+  "a stack variable collides with any other declaration": {
+    source: [
+      "let idle = 1",
+      "stack idle",
+    ],
+    error: "Line 1: idle was already defined",
+  },
+  // Imports
+  "an imported stack variable is read from its module's chip": {
+    modules: { ExampleFileA: ["stack idle = false", "const size = 2", "let arr[size] = [1, 2]"] },
+    source: [
+      'import idle from "ExampleFileA" using d0',
+      'import arr from "ExampleFileA" using d0',
+      'import size from "ExampleFileA"',
+      "d1.Setting = idle",
+      "d2.Setting = arr[0]",
+      "d3.Setting = size",
+    ],
+    // idle is ExampleFileA's first cell (511) and arr the next two (509-510),
+    // and no space is reserved here - the cells belong to the other chip. An
+    // imported const needs no device and emits no read at all.
+    expected: [
+      "get r0 d0 511",
+      "s d1 Setting r0",
+      "get r0 d0 509",
+      "s d2 Setting r0",
+      "s d3 Setting 2",
+    ]
+  },
+  "writing through an import writes the other chip's stack": {
+    modules: { ExampleFileA: ["stack idle", "let arr[2]"] },
+    source: [
+      'import idle from "ExampleFileA" using d0',
+      'import arr from "ExampleFileA" using d0',
+      "idle = 1",
+      "arr[1] = d1.Setting",
+    ],
+    expected: [
+      "put d0 511 1",
+      "l r0 d1 Setting",
+      "put d0 510 r0",
+    ]
+  },
+  "an imported list iterates like a local one": {
+    modules: { ExampleFileA: "let arr[2]" },
+    source: [
+      'import arr from "ExampleFileA" using d0',
+      "for let x of arr do",
+      "  d1.Setting = x",
+      "end",
+    ],
+    expected: [
+      "move r0 510",
+      "forof0:",
+      "get r1 d0 r0",
+      "s d1 Setting r1",
+      "add r0 r0 1",
+      "blt r0 512 forof0",
+    ]
+  },
+  "a module is only read once however many names come from it": {
+    // Two imports of a module the handler can only answer once.
+    modules: { ExampleFileA: "const a = 1\nconst b = 2" },
+    source: [
+      'import a from "ExampleFileA"',
+      'import b from "ExampleFileA"',
+      "d0.Setting = a + b",
+    ],
+    expected: "s d0 Setting 3",
+  },
+  "a missing module is an error": {
+    source: 'import x from "Nope"',
+    error: 'Line 0: Cannot find module "Nope"',
+  },
+  "importing a name the module does not declare is an error": {
+    modules: { ExampleFileA: "const size = 2" },
+    source: 'import nope from "ExampleFileA"',
+    error: 'Line 0: nope is not declared in "ExampleFileA"',
+  },
+  "importing stack memory without a device is an error": {
+    modules: { ExampleFileA: "stack idle" },
+    source: 'import idle from "ExampleFileA"',
+    error: "Line 0: idle lives in \"ExampleFileA\"'s stack memory; " +
+      "say which device it is on (`using d0`)",
+  },
+  "importing a constant with a device is an error": {
+    modules: { ExampleFileA: "const size = 2" },
+    source: 'import size from "ExampleFileA" using d0',
+    error: 'Line 0: size is a constant in "ExampleFileA"; it is not read from a device',
+  },
+  "an import collides with a later declaration of the same name": {
+    modules: { ExampleFileA: "const size = 2" },
+    source: [
+      'import size from "ExampleFileA"',
+      "let size = 3",
+    ],
+    error: "Line 1: size was already defined",
+  },
+  "an import collides with a function of the same name": {
+    modules: { ExampleFileA: "const size = 2" },
+    source: [
+      "fn size()",
+      "  return 1",
+      "end",
+      'import size from "ExampleFileA"',
+    ],
+    error: "Line 3: size was already defined",
+  },
+  "a module's own let is not importable": {
+    modules: { ExampleFileA: "let x = 1" },
+    source: 'import x from "ExampleFileA"',
+    error: 'Line 0: x is not declared in "ExampleFileA"',
+  },
+  "a module's stack memory must be declared at the top level to be imported": {
+    // The body is lowered once per call site, so the cells it takes are not
+    // in a predictable place - the import is rejected rather than guessed at.
+    modules: {
+      ExampleFileA: [
+        "fn f()",
+        "  let scratch[2]",
+        "end",
+        "f()",
+        "stack idle",
+      ],
+    },
+    source: 'import idle from "ExampleFileA" using d0',
+    error: 'Line 0: In module "ExampleFileA": ' +
+      "Line 1: stack memory declared outside the top level cannot be imported",
+  },
+  "a module's own imports are not re-exported": {
+    modules: {
+      ExampleFileA: 'import size from "ExampleFileB"',
+      ExampleFileB: "const size = 2",
+    },
+    source: 'import size from "ExampleFileA"',
+    error: 'Line 0: size is not declared in "ExampleFileA"',
+  },
+  "a module's list size must be a constant": {
+    modules: { ExampleFileA: "let n = 2\nlet arr[n]" },
+    source: 'import arr from "ExampleFileA" using d0',
+    error: 'Line 0: In module "ExampleFileA": Line 1: List size must be constant',
+  },
+  "reading a list without an index is an error": {
+    source: [
+      "let arr[2] = [1, 2]",
+      "d0.Setting = arr",
+    ],
+    error: "Line 1: arr is a list; read one element (arr[0])",
+  },
 };
 
 // Lines may be written as a string or an array of lines; join arrays.
@@ -2449,16 +2634,20 @@ const joinLines = text => (typeof text === "string" || !text ? text : text.join(
 /**
  * Compile one case spec, returning the output string or the CompileError.
  * `inlineThreshold: 0` turns off small-body inlining, which is how the cases
- * about jal-style calls keep having a jal to look at.
+ * about jal-style calls keep having a jal to look at. A case's `modules` map
+ * is what `import` reads from; a path missing from it is a missing file, which
+ * is what the case about that relies on.
  */
-export function runCase({ source, order, inlineThreshold }) {
+export function runCase({ source, order, inlineThreshold, modules = {} }) {
   const config = {
     removeLabels: false,
     registerOrder: order ?? REDUCED_ORDER,
     ...(inlineThreshold === undefined ? {} : { inlineThreshold }),
   };
+  const fileHandler = path =>
+    Object.hasOwn(modules, path) ? joinLines(modules[path]) : undefined;
   try {
-    return compile(getAST(joinLines(source)), config);
+    return compile(getAST(joinLines(source)), config, fileHandler);
   } catch (e) {
     if (!(e instanceof CompileError)) throw e;
     return e;

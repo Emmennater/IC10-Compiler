@@ -891,13 +891,16 @@ export function convertStatement(node: SyntaxNode): Statement {
 
     case "StackDeclaration": {
       const nameNode = parts.find(c => c.type === "VariableName");
-      const valueNode = parts.find(c => EXPRESSION_TYPES.has(c.type));
+      // The initializer is whatever follows the `=`, not the first expression
+      // in the statement - a VariableName is itself one, so searching for the
+      // first would find the name being declared.
+      const assign = parts.findIndex(c => c.type === "Assign");
       if (!nameNode) fail("Malformed stack declaration", node);
       return {
         ...rangeOf(node),
         type: "stackdeclaration",
         name: convertIdentifier(nameNode),
-        value: valueNode ? convertExpression(valueNode) : undefined,
+        value: assign < 0 ? undefined : convertExpression(parts[assign + 1]),
       };
     }
 

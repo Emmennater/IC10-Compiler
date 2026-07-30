@@ -58,8 +58,11 @@ export type Inst =
   | { id: number; op: "movev"; dest: number; src: Operand; node: SourceRange }
   | { id: number; op: "loadname"; dest: number; name: string; node: SourceRange }
   | { id: number; op: "storename"; name: string; src: Operand; node: SourceRange }
-  | { id: number; op: "get"; dest: number; addr: Operand; node: SourceRange }
-  | { id: number; op: "poke"; addr: Operand; src: Operand; node: SourceRange }
+  // Stack memory access. `device` is the pin the memory sits behind: `db` is
+  // this chip's own stack, and any other pin is a list or stack variable
+  // imported from another module, which lives on that module's chip.
+  | { id: number; op: "get"; dest: number; device: string; addr: Operand; node: SourceRange }
+  | { id: number; op: "put"; device: string; addr: Operand; src: Operand; node: SourceRange }
   // Reserve space in the stack for lists
   | { id: number; op: "reserve"; name: string; size: number; node: SourceRange }
   // A raw IC10 instruction (yield, sleep, l, s, ls, lb, user calls, ...).
@@ -139,7 +142,7 @@ export function destOf(inst: Inst): number | null {
       return inst.dest;
     case "reserve":
     case "storename":
-    case "poke":
+    case "put":
     case "alias":
     case "definedef":
     case "label":
@@ -170,7 +173,7 @@ export function operandsOf(inst: Inst): Operand[] {
     case "movev":
     case "storename":
       return [inst.src];
-    case "poke":
+    case "put":
       return [inst.addr, inst.src];
     case "get":
       return [inst.addr];
@@ -203,7 +206,7 @@ export function symsOf(inst: Inst): string[] {
 /** Whether the instruction must survive even if its value is unused. */
 export function hasSideEffect(inst: Inst): boolean {
   // Calls without a destination write devices, sleep, yield, ...
-  return inst.op === "storename" || inst.op === "poke" ||
+  return inst.op === "storename" || inst.op === "put" ||
     (inst.op === "call" && inst.dest === null);
 }
 

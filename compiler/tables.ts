@@ -28,6 +28,13 @@ export const VAR_REGISTER_ORDER: readonly number[] =
 /** Spilled values live at fixed stack addresses growing down from here. */
 export const STACK_TOP = 511;
 
+/**
+ * The device pin naming the chip the program runs on. Its own stack memory is
+ * what lists, stack variables and spilled values live in; a list imported
+ * from another module names that module's chip instead.
+ */
+export const SELF_DEVICE = "db";
+
 /** Comparison opcodes to the opcodes producing their result as data (0/1). */
 export const SET_OPCODES: Readonly<Record<ComparisonOpcode, string>> = {
   eq: "seq", ne: "sne", gt: "sgt", lt: "slt", ge: "sge", le: "sle",

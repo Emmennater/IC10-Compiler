@@ -15,7 +15,7 @@
  * which scopes are visible, and where the function boundary sits.
  */
 
-import type { Expression } from "./formal-ast.ts";
+import type { DevicePin, Expression } from "./formal-ast.ts";
 import type { Operand } from "./ir.ts";
 
 /** One variable's compile-time state. */
@@ -38,8 +38,13 @@ export type Sym =
   // A read-only parameter of an inlined function: each use re-compiles the
   // argument expression in the caller's chain (textual inlining)
   | { kind: "alias"; argNode: Expression; callerChain: ScopeChain }
-  // Array declarations
-  | { kind: "list"; start: number; size: number };
+  // A block of stack memory, addresses `start` .. `start + size - 1`, on the
+  // chip named by `device`: `db` for a list this program declared, another pin
+  // for one imported from the module running on that chip
+  | { kind: "list"; start: number; size: number; device: DevicePin }
+  // One cell of stack memory - the single-element case of a list, read and
+  // written by name instead of through an index
+  | { kind: "stackvar"; addr: number; device: DevicePin };
 
 export type Scope = Map<string, Sym>;
 

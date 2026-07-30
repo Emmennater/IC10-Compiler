@@ -35,10 +35,14 @@ export function renderProgram(program: Inst[], registerOf: Map<number, number>):
         lines.push(`move ${inst.name} ${fmt(inst.src)}`);
         break;
       case "get":
-        lines.push(`get ${reg(inst.dest)} db ${fmt(inst.addr)}`);
+        lines.push(`get ${reg(inst.dest)} ${inst.device} ${fmt(inst.addr)}`);
         break;
-      case "poke":
-        lines.push(`poke ${fmt(inst.addr)} ${fmt(inst.src)}`);
+      case "put":
+        // A write to this chip's own stack is spelled `poke`, which takes the
+        // address alone; every other device needs `put` and the pin.
+        lines.push(inst.device === "db"
+          ? `poke ${fmt(inst.addr)} ${fmt(inst.src)}`
+          : `put ${inst.device} ${fmt(inst.addr)} ${fmt(inst.src)}`);
         break;
       case "call":
         lines.push(inst.dest === null

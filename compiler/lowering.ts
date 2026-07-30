@@ -23,9 +23,10 @@
  * frame was never modified - the JavaScript call stack is the only stack.
  */
 
-import type { ErrorReporter } from "./syntax.ts";
+import { CompileError, ErrorReporter } from "./syntax.ts";
+import { getAST } from "./ast.ts";
 import {
-  childrenOf,
+  childrenOf, getFormalAST,
   type ArithmeticOpcode, type ArrayDeclaration as ListDeclaration, type ListIndexing,
   type Assignment, type BinaryOp, type Block, type ComparisonOp, type ComparisonOpcode,
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
@@ -42,7 +43,7 @@ import {
 } from "./ir.ts";
 import {
   AGGREGATORS, BRANCH_FALSE, BRANCH_TRUE, MIRROR, OPCODE_ALIASES, SET_OPCODES,
-  STACK_TOP,
+  SELF_DEVICE, STACK_TOP,
   applyBinary, applyBitwiseNot, compare,
 } from "./tables.ts";
 import { ScopeChain, type Scope, type VarState } from "./symbols.ts";
@@ -53,7 +54,7 @@ import {
 import { ConstexprEvaluator } from "./constexpr.ts";
 import { LabelFactory } from "./labels.ts";
 import { StatementScope } from "./statement-scope.ts";
-import { foldExpression, pressure } from "./folding.ts";
+import { foldExpression, pressure, type ConstantLookup } from "./folding.ts";
 
 /** Everything phase 2 (optimization) needs from lowering. */
 export type LoweredProgram = {
@@ -93,6 +94,129 @@ export const INLINE_THRESHOLD = 3;
 
 /** Mapping names to array declarations. */
 type ArrayTable = Map<string, { start: number; size: number; }>;
+
+/** How the compiler reads another module's source; missing files return nothing. */
+export type FileHandler = (path: string) => string | null | undefined;
+
+/** What a module offers the programs that import from it. */
+type ModuleExport =
+  // A `const`: a compile-time value, so the import is one too and costs nothing
+  | { kind: "const"; value: ConstOperand }
+  // A `stack` declaration: one cell of the module's chip's stack memory
+  | { kind: "stackvar"; addr: number }
+  // A list: `size` cells of it, starting at `start`
+  | { kind: "list"; start: number; size: number };
+
+/**
+ * Take `size` cells from the top of the free stack space below `top`, and
+ * report the new top. The cells run *upwards* from the address returned, so a
+ * list's first element sits lowest and the space below stays free for the next
+ * declaration and, after those, for spilled values.
+ *
+ * Both the frame that declares stack memory and the scan that works out where
+ * an imported module put its own call this, because the two must agree cell
+ * for cell: an importer computes addresses it never sees reserved.
+ */
+function allocateCells(top: number, size: number): { start: number; top: number } {
+  return { start: top - size + 1, top: top - size };
+}
+
+/**
+ * The element count of a list declaration. A `define` is deliberately not
+ * usable here (`fold` resolves names through `lookupVar`, which skips defines):
+ * the player can retune a define in the chip, and a list whose size had been
+ * baked into addresses would not survive that.
+ */
+function listSize(statement: ListDeclaration, constantOf: ConstantLookup, errors: ErrorReporter): number {
+  const sizeOp = foldExpression(statement.size, constantOf);
+  if (!sizeOp) throw errors.error("List size must be constant", statement.size);
+  const size = parseFloat(sizeOp.text);
+  if (!Number.isInteger(size)) throw errors.error("List size must be an integer", statement.size);
+  return size;
+}
+
+/**
+ * What a module's top-level declarations offer an importer: the value of every
+ * `const`, and the stack address of every `stack` and list declaration.
+ *
+ * The addresses are recomputed here rather than read out of a compile of the
+ * module, so this walk allocates cells exactly as the declarations themselves
+ * do - same order, same arithmetic, via `allocateCells`. That is only
+ * predictable while every declaration is top level: a list inside a function
+ * body is allocated once per lowering of that body, which depends on where the
+ * module calls it, so a module with one is rejected instead of guessed at.
+ *
+ * Only `const` becomes a value export. A `let` lives in the module's own
+ * registers, and its top-level value is not what a reader on another chip
+ * would see anyway.
+ */
+function moduleInterface(module: Block, errors: ErrorReporter): Map<string, ModuleExport> {
+  const exports = new Map<string, ModuleExport>();
+  const constants = new Map<string, ConstOperand>();
+  const constantOf: ConstantLookup = name => constants.get(name) ?? null;
+
+  const nestedDeclaration = (node: FormalSyntaxNode): FormalSyntaxNode | null => {
+    if (node.type === "stackdeclaration" || node.type === "arraydeclaration") return node;
+    for (const child of childrenOf(node)) {
+      const found = nestedDeclaration(child);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  let top = STACK_TOP;
+  for (const statement of module.statements) {
+    // Only the statement's *children* are searched: the statement itself being
+    // a declaration is the case this whole function is about.
+    for (const child of childrenOf(statement)) {
+      const nested = nestedDeclaration(child);
+      if (nested) {
+        throw errors.error(
+          "stack memory declared outside the top level cannot be imported", nested);
+      }
+    }
+
+    switch (statement.type) {
+      case "declaration": {
+        if (!statement.constant || !statement.value) break;
+        const value = foldExpression(statement.value, constantOf);
+        if (!value) break; // a const of a runtime value: nothing to export
+        constants.set(statement.target.name, value);
+        exports.set(statement.target.name, { kind: "const", value });
+        break;
+      }
+      case "stackdeclaration": {
+        const cell = allocateCells(top, 1);
+        top = cell.top;
+        exports.set(statement.name.name, { kind: "stackvar", addr: cell.start });
+        break;
+      }
+      case "arraydeclaration": {
+        const size = listSize(statement, constantOf, errors);
+        const cells = allocateCells(top, size);
+        top = cells.top;
+        exports.set(statement.name.name, { kind: "list", start: cells.start, size });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return exports;
+}
+
+/**
+ * The module an `import ... from "x"` names. A StringExpr carries the raw
+ * spelling, quotes included - that is what `HASH("...")` wants of every other
+ * string - so the quotes come off here. Escapes are left alone: the grammar
+ * does not decode them and a module path has no use for one.
+ */
+function modulePath(node: StringExpr): string {
+  const text = node.value;
+  return text.length >= 2 && text.startsWith('"') && text.endsWith('"')
+    ? text.slice(1, -1)
+    : text;
+}
 
 /**
  * Services shared by every frame of one compilation: id sequences, label
@@ -169,15 +293,17 @@ export class Lowerer {
   }
 
   /** Lower the whole tree and assemble headers, functions, and main code. */
-  lower(fileHandler: Function): LoweredProgram {
-    this.registerImports(fileHandler);
+  lower(fileHandler: FileHandler): LoweredProgram {
+    // Functions first, so an import colliding with one is caught as such.
     this.registerFunctions();
+    const globals = ScopeChain.root();
+    this.registerImports(fileHandler, globals);
     this.collectFnGlobalNames();
 
     const mainBuffer: Inst[] = [];
     const root = new FrameLowerer(this.services, {
       buffer: mainBuffer,
-      chain: ScopeChain.root(),
+      chain: globals,
       statements: new StatementScope(0),
       returnTarget: null,
       loop: null,
@@ -250,36 +376,117 @@ export class Lowerer {
     }
   }
 
-  private registerImports(fileHandler: Function): void {
-    /**
-     * Imports are used to access variables from other modules.
-     * There are two kinds of imports: one with/without a device.
-     * The device is included when the variable references stack memory.
-     * Here are some examples:
-     * - Lists: `let arr[4] = [10, 20, 30, 40]; import arr from "..." using d0`
-     * - Stack variables: `stack idle; import idle from "..." using d0`
-     * If a variable is imported without a device, it is always constant.
-     * - Constants: `const x = 10; import x from "..."`
-     * Once a variable is imported, it can be referenced by name.
-     * ExampleFileA:
-     * stack idle = false
-     * const size = 2
-     * let arr[size] = [1, 2]
-     * ExampleFileB:
-     * import idle from "ExampleFileA" using d0
-     * import arr from "ExampleFileA" using d0
-     * import size from "ExampleFileA"
-     * d1.Setting = idle
-     * d2.Setting = arr[0]
-     * d3.Setting = size
-     * ExampleFileB Output:
-     * get r0 d0 511 # idle lives at address 511 in ExampleFileA
-     * s d1 Setting r0
-     * get r0 d0 509 # arr[0] lives at address 509 in ExampleFileA
-     * s d2 Setting r0
-     * s d3 Setting 2 
-     */
+  /**
+   * Bind every top-level `import` into the global scope, before any code is
+   * lowered, so an imported name resolves exactly like a locally declared one
+   * from that point on.
+   *
+   * An import comes in two shapes, and which one is right follows from what
+   * the module declared rather than from how the import is written:
+   *
+   * - Stack memory - a `stack` variable or a list - lives on the chip running
+   *   that module, so reaching it takes a device: `using d0` names the pin this
+   *   chip sees it on. The address is the module's, computed by
+   *   `moduleInterface`; nothing is reserved here, because the cells belong to
+   *   the other chip.
+   * - A `const` is a compile-time value, so importing one substitutes the value
+   *   and reads no device at all.
+   *
+   *     # ExampleFileA
+   *     stack idle = false
+   *     const size = 2
+   *     let arr[size] = [1, 2]
+   *
+   *     # ExampleFileB
+   *     import idle from "ExampleFileA" using d0
+   *     import arr from "ExampleFileA" using d0
+   *     import size from "ExampleFileA"
+   *     d1.Setting = idle
+   *     d2.Setting = arr[0]
+   *     d3.Setting = size
+   *
+   *     get r0 d0 511    # idle is ExampleFileA's first stack cell
+   *     s d1 Setting r0
+   *     get r0 d0 509    # arr[0] is the next two cells' base
+   *     s d2 Setting r0
+   *     s d3 Setting 2   # size needed no device and emits no read
+   *
+   * A module is read once however many names come from it, and is only scanned
+   * for its interface - its own code is never lowered here, and its own imports
+   * are not re-exported.
+   */
+  private registerImports(fileHandler: FileHandler, globals: ScopeChain): void {
+    const { errors, fnTable } = this.services;
+    const scanned = new Map<string, Map<string, ModuleExport>>();
 
+    for (const statement of this.ast.statements) {
+      if (statement.type !== "import") continue;
+      const name = statement.name.name;
+      if (globals.lookup(name) || fnTable.has(name)) {
+        throw errors.error(`${name} was already defined`, statement.name);
+      }
+
+      const path = modulePath(statement.path);
+      let exports = scanned.get(path);
+      if (!exports) {
+        exports = this.scanModule(path, statement, fileHandler);
+        scanned.set(path, exports);
+      }
+
+      const exported = exports.get(name);
+      if (!exported) {
+        throw errors.error(`${name} is not declared in ${JSON.stringify(path)}`, statement.name);
+      }
+      const pin = statement.device?.name;
+
+      if (exported.kind === "const") {
+        if (statement.device) {
+          throw errors.error(
+            `${name} is a constant in ${JSON.stringify(path)}; it is not read from a device`,
+            statement.device);
+        }
+        // Identical to a local `const`: a value the rest of the compile folds.
+        globals.declare(name, {
+          kind: "var",
+          state: { value: exported.value, maybe: false, home: null },
+          constant: true,
+        });
+        continue;
+      }
+
+      if (!pin) {
+        throw errors.error(
+          `${name} lives in ${JSON.stringify(path)}'s stack memory; ` +
+          "say which device it is on (`using d0`)", statement);
+      }
+      globals.declare(name, exported.kind === "stackvar"
+        ? { kind: "stackvar", addr: exported.addr, device: pin }
+        : { kind: "list", start: exported.start, size: exported.size, device: pin });
+    }
+  }
+
+  /**
+   * Read a module and work out what it offers. Its own diagnostics are raised
+   * against its own text - so their line numbers point into it - and then
+   * wrapped in one against the `import` that pulled it in, which is the line an
+   * editor can actually take the reader to.
+   */
+  private scanModule(
+    path: string,
+    statement: Import,
+    fileHandler: FileHandler,
+  ): Map<string, ModuleExport> {
+    const source = fileHandler(path);
+    if (typeof source !== "string") {
+      throw this.services.errors.error(`Cannot find module ${JSON.stringify(path)}`, statement.path);
+    }
+    const moduleErrors = new ErrorReporter(source);
+    try {
+      return moduleInterface(getFormalAST(getAST(source)), moduleErrors);
+    } catch (e) {
+      if (!(e instanceof CompileError)) throw e;
+      throw this.services.errors.error(`In module ${JSON.stringify(path)}: ${e.message}`, statement);
+    }
   }
 
   /**
@@ -367,11 +574,16 @@ class FrameLowerer {
    * this supplies the only thing it cannot know on its own.
    */
   private fold(node: Expression): ConstOperand | null {
-    return foldExpression(node, name => {
+    return foldExpression(node, this.constantOf);
+  }
+
+  /** The name-to-constant answer `fold` and `listSize` both need. */
+  private get constantOf(): ConstantLookup {
+    return name => {
       const state = this.chain.lookupVar(name);
       if (state && !state.maybe && state.value?.kind === "const") return state.value;
       return null;
-    });
+    };
   }
 
   /** Register pressure of a subtree, used only to pick evaluation order. */
@@ -480,7 +692,7 @@ class FrameLowerer {
     });
 
     const dest = this.ids.newVreg();
-    this.emit({ op: "get", addr, dest, node });
+    this.emit({ op: "get", addr, dest, device: list.device, node });
     return { kind: "vreg", id: dest };
   }
 
@@ -672,6 +884,15 @@ class FrameLowerer {
       // caller's chain, where its names resolve. The chain is an immutable
       // value the alias captured for free - nothing to swap in or out.
       return this.withContext({ chain: symbol.callerChain }).compileExpression(symbol.argNode);
+    }
+    if (symbol?.kind === "stackvar") {
+      // A cell of stack memory, which only `get` can bring into a register.
+      const dest = this.ids.newVreg();
+      this.emit({ op: "get", dest, device: symbol.device, addr: constTextOp(String(symbol.addr)), node });
+      return { kind: "vreg", id: dest };
+    }
+    if (symbol?.kind === "list") {
+      throw this.errors.error(`${name} is a list; read one element (${name}[0])`, node);
     }
     // Placeholder read: must come into a register through a move
     const cached = this.statements.cachedLoad(name);
@@ -1368,6 +1589,7 @@ class FrameLowerer {
     this.emit({
       op: "get",
       dest: elem.state.home,
+      device: list.device,
       addr: { kind: "vreg", id: indexVreg },
       node: node.decl
     });
@@ -1735,6 +1957,13 @@ class FrameLowerer {
 
     if (target.type === "identifier") {
       const symbol = this.chain.lookup(target.name);
+      if (symbol?.kind === "stackvar") {
+        this.emit({
+          op: "put", device: symbol.device,
+          addr: constTextOp(String(symbol.addr)), src: value, node: statement,
+        });
+        return;
+      }
       if (symbol && symbol.kind !== "var") {
         throw this.errors.error(`Cannot assign to ${target.name}`, target);
       }
@@ -1771,7 +2000,7 @@ class FrameLowerer {
         } as Expression,
         opcode: "add" as ArithmeticOpcode,
       });
-      this.emit({ op: "poke", addr, src: value, node: statement });
+      this.emit({ op: "put", device: list.device, addr, src: value, node: statement });
       return;
     }
 
@@ -1862,29 +2091,43 @@ class FrameLowerer {
       throw this.errors.error(`List ${name} is already defined`, statement);
     }
 
-    // Determine list size
-    const sizeOp = this.fold(statement.size);
-    if (!sizeOp) throw this.errors.error("List size must be constant", statement.size);
-    const size = parseFloat(sizeOp.text);
-    if (!Number.isInteger(size)) throw this.errors.error("List size must be an integer", statement.size);
-
-    // Calculate the next available stack address
-    let baseAddr = this.shared.stackTop;
-    this.shared.stackTop -= size;
-
-    const start = baseAddr - size + 1;
-    this.chain.declare(name, { kind: "list", start, size });
-    this.emit({ op: "reserve", name, size, node: statement });
+    const size = listSize(statement, this.constantOf, this.errors);
+    const start = this.reserveCells(name, size, statement);
 
     for (let i = 0; i < list.length; i++) {
       const src = this.compileExpression(list[i]);
-      const addr = { kind: "const", text: String(start + i) } as Operand;
-      this.emit({ op: "poke", addr: addr, src, node: statement });
+      const addr = constTextOp(String(start + i));
+      this.emit({ op: "put", device: SELF_DEVICE, addr, src, node: statement });
     }
   }
 
+  /** A stack variable is the one-cell case of a list, named instead of indexed. */
   private processStackDeclaration(statement: StackDeclaration): void {
-    // TODO: Implement
-    // Behaves exactly like a one element list declaration
+    this.checkUndeclared(statement.name);
+    const name = statement.name.name;
+    const { start, top } = allocateCells(this.shared.stackTop, 1);
+    this.shared.stackTop = top;
+    this.chain.declare(name, { kind: "stackvar", addr: start, device: SELF_DEVICE });
+    this.emit({ op: "reserve", name, size: 1, node: statement });
+    if (statement.value) {
+      const src = this.compileExpression(statement.value);
+      this.emit({
+        op: "put", device: SELF_DEVICE,
+        addr: constTextOp(String(start)), src, node: statement,
+      });
+    }
+  }
+
+  /**
+   * Claim `size` cells of this chip's stack for `name` and bind it. The
+   * `reserve` marker carries no code; it is what tells the register allocator
+   * where the addresses it may spill into start.
+   */
+  private reserveCells(name: string, size: number, statement: Range): number {
+    const { start, top } = allocateCells(this.shared.stackTop, size);
+    this.shared.stackTop = top;
+    this.chain.declare(name, { kind: "list", start, size, device: SELF_DEVICE });
+    this.emit({ op: "reserve", name, size, node: statement });
+    return start;
   }
 }

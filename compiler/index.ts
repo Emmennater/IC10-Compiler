@@ -26,13 +26,14 @@ import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
 import { getFormalAST } from "./formal-ast.ts";
 import { IdAllocator } from "./ir.ts";
 import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables.ts";
-import { INLINE_THRESHOLD, Lowerer } from "./lowering.ts";
+import { INLINE_THRESHOLD, Lowerer, type FileHandler } from "./lowering.ts";
 import { optimize } from "./optimize.ts";
 import { allocateRegisters } from "./regalloc.ts";
 import { renderProgram, resolveLabels } from "./render.ts";
 
 export { CompileError } from "./syntax.ts";
 export type { SyntaxNode } from "./syntax.ts";
+export type { FileHandler } from "./lowering.ts";
 
 export type Config = {
   /** Replace labels with absolute line numbers in the output. */
@@ -84,9 +85,13 @@ function validateConfig(registerOrder: readonly number[], inlineThreshold: numbe
  * Compile a parsed program to IC10 assembly text.
  * @param ast The programs AST
  * @param config Compiler configuration
- * @param fileHandler Callback for retrieving file contents
+ * @param fileHandler Callback for retrieving file contents, for `import`
  * */
-export function compile(ast: SyntaxNode, config: Partial<Config> = {}, fileHandler = () => {}): string {
+export function compile(
+  ast: SyntaxNode,
+  config: Partial<Config> = {},
+  fileHandler: FileHandler = () => undefined,
+): string {
   const removeLabels = config.removeLabels ?? DEFAULT_CONFIG.removeLabels;
   const registerOrder = config.registerOrder ?? DEFAULT_CONFIG.registerOrder;
   const inlineThreshold = config.inlineThreshold ?? DEFAULT_CONFIG.inlineThreshold;
