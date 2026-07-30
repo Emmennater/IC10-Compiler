@@ -58,8 +58,8 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
 const LANGUAGE_LABELS = { icc: "ICC", ic10: "IC10" };
 
 function blockLabel(language, name) {
-  if (name) return name;
-  return LANGUAGE_LABELS[language] || language || "Code";
+  const lang = LANGUAGE_LABELS[language] || language || "Code"
+  return lang + (name ? `: ${name}` : "");
 }
 
 // Every code block is a `.code-group`, including the ones with nothing to

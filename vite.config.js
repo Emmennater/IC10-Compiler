@@ -97,17 +97,27 @@ function prerenderDocs() {
 
     configureServer(server) {
       devServer = server;
+    },
 
-      // transformIndexHtml re-renders on request, so a reload is all that is
-      // needed - but only a reload the browser is told to perform. The docs
-      // source and the compiler are not in the page's module graph any more
-      // (that is the point), so nothing else would notice they changed.
-      server.watcher.on("change", file => {
-        const changed = file.replace(/\\/g, "/");
-        if (changed.endsWith(`/${DOCS_SOURCE}`) || changed.includes("/compiler/")) {
-          server.ws.send({ type: "full-reload", path: "/docs.html" });
-        }
-      });
+    // transformIndexHtml re-renders on request, so a reload is all that is
+    // needed - but only a reload the browser is told to perform. Everything the
+    // prerender reads was deliberately taken out of the page's module graph, so
+    // the client environment sees no module change and says nothing.
+    //
+    // The generator's own dependencies are exactly the ssr environment's module
+    // graph, which `load` populates and vite invalidates on change - so `ssr`
+    // reporting any affected module is the signal, and it covers
+    // docs-render.js, docs-examples.js, highlight.js, theme.js, the compiler
+    // and the Lezer parsers without naming any of them. Naming them was the
+    // bug: the old watcher listed only `compiler/`, so an edit to the generator
+    // itself re-rendered on the next request but nothing ever asked for one.
+    //
+    // docs.markdoc.md is the one input that is not a module - it is read with
+    // readFileSync - so it stays an explicit check.
+    hotUpdate({ file, modules }) {
+      if (this.environment.name !== "ssr") return;
+      if (!modules.length && !file.endsWith(`/${DOCS_SOURCE}`)) return;
+      devServer.environments.client.hot.send({ type: "full-reload", path: "/docs.html" });
     },
 
     transformIndexHtml: {

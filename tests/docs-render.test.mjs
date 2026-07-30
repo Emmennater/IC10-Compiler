@@ -113,7 +113,7 @@ describe("docs markup", () => {
       '```icc {% name="lib.icc" %}\nconst Limit = 5\n```\n\n' +
       '```icc {% compile=true %}\nimport Limit from "lib.icc"\nc = Limit\n```\n'
     );
-    expect(html).toMatch(/<span class="code-block-label">lib\.icc<\/span>/);
+    expect(html).toMatch(/<span class="code-block-label">ICC: lib\.icc<\/span>/);
     expect(text(html)).toMatch(/move c 5/);
   });
 
