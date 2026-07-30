@@ -32,7 +32,7 @@ import {
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
   type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
   type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
-  type StringExpr, type UnaryOp, type While, type For, type ForIn, type ForOf,
+  type StringExpr, type TernaryOp, type UnaryOp, type While, type For, type ForIn, type ForOf,
   type StackDeclaration, type Import
 } from "./formal-ast.ts";
 import {
@@ -859,6 +859,8 @@ class FrameLowerer {
       case "comparisonop":
       case "logicalop":
         return this.compileBinaryOp(node);
+      case "ternaryop":
+        return this.compileTernaryOp(node);
       case "listindexing":
         return this.compileIndexing(node);
       default:
@@ -989,6 +991,45 @@ class FrameLowerer {
 
     const dest = this.ids.newVreg();
     this.emit({ op: "alu", opcode: node.opcode, dest, args: [a, b], node });
+    return { kind: "vreg", id: dest };
+  }
+
+  /**
+   * `cond ? a : b` as IC10's `select`, which takes all three as operands.
+   *
+   * That makes it a value, not control flow: both arms are evaluated, so a
+   * ternary whose arms read devices emits both loads. Only a condition that
+   * settles at compile time skips an arm, and it skips *compiling* it rather
+   * than leaving the code for dead code elimination - exactly what a constant
+   * `if` condition does to its arms, and for the same reason: an arm the
+   * program cannot reach must not be able to raise a compile error either.
+   */
+  private compileTernaryOp(node: TernaryOp): Operand {
+    const condition = this.compileExpression(node.condition);
+    if (condition.kind === "const") {
+      return this.compileExpression(parseFloat(condition.text) !== 0 ? node.then : node.else);
+    }
+
+    // Both arms are live at the select, so the hungrier one goes first for
+    // the same reason a binary operator's does.
+    let a: Operand;
+    let b: Operand;
+    if (this.pressureOf(node.else) > this.pressureOf(node.then)) {
+      b = this.compileExpression(node.else);
+      a = this.compileExpression(node.then);
+    } else {
+      a = this.compileExpression(node.then);
+      b = this.compileExpression(node.else);
+    }
+
+    // Nothing to select between: the arms are the same literal either way.
+    if (a.kind === "const" && b.kind === "const" && a.text === b.text) return a;
+
+    const dest = this.ids.newVreg();
+    this.emit({ op: "alu", opcode: "select", dest, args: [condition, a, b], node });
+    // A select over two 0/1 arms is itself 0/1, so `&&` and `||` can use it
+    // without coercing.
+    if (this.isBoolOperand(a) && this.isBoolOperand(b)) this.boolVregs.add(dest);
     return { kind: "vreg", id: dest };
   }
 

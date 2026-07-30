@@ -76,6 +76,7 @@ export type Expression =
   | UnaryOp
   | ComparisonOp
   | LogicalOp
+  | TernaryOp
   | Device
   | FunctionCall
   | ListIndexing;
@@ -370,6 +371,19 @@ export type LogicalOp = Range & {
   left: Expression;
   right: Expression;
   opcode: "and" | "or";
+};
+
+// <expression> ? <expression> : <expression>
+/**
+ * The field names match `IfThen`'s deliberately - it is the same three parts
+ * in expression position - but this is *not* control flow: IC10's `select`
+ * takes both results as operands, so both arms are evaluated.
+ */
+export type TernaryOp = Range & {
+  type: "ternaryop";
+  condition: Expression;
+  then: Expression;
+  else: Expression;
 };
 
 export type DevicePin = "d0" | "d1" | "d2" | "d3" | "d4" | "d5" | "db";
@@ -672,6 +686,23 @@ function convertBinary(node: SyntaxNode): BinaryOp | ComparisonOp | LogicalOp {
   return fail(`Unknown operator ${opNode.text}`, opNode);
 }
 
+function convertTernary(node: SyntaxNode): TernaryOp {
+  // `<cond> ? <then> : <else>`: five children, the two punctuation tokens
+  // included. A nested ternary is a TernaryOp node of its own, so the
+  // positions are fixed however the arms are spelled.
+  const parts = kids(node);
+  if (parts.length !== 5 || parts[1].type !== "Question" || parts[3].type !== "Colon") {
+    fail("Malformed conditional expression", node);
+  }
+  return {
+    type: "ternaryop",
+    ...rangeOf(node),
+    condition: convertExpression(parts[0]),
+    then: convertExpression(parts[2]),
+    else: convertExpression(parts[4]),
+  };
+}
+
 export function convertExpression(node: SyntaxNode): Expression {
   switch (node.type) {
     case "Integer":
@@ -706,6 +737,8 @@ export function convertExpression(node: SyntaxNode): Expression {
     }
     case "BinaryOp":
       return convertBinary(node);
+    case "TernaryOp":
+      return convertTernary(node);
     case "FunctionCall":
       return convertCall(node);
     default:
@@ -1037,6 +1070,7 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "logicalop":
       return [node.left, node.right];
     case "unaryop": return [node.value];
+    case "ternaryop": return [node.condition, node.then, node.else];
     case "arraydeclaration":
       return [node.name, node.size, ...(node.list ? node.list.elements : [])];
     case "listindexing": return [node.list, node.index];

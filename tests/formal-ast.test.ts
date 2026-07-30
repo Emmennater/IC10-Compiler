@@ -249,6 +249,31 @@ describe("expressions", () => {
     expect(statement.value).toMatchObject({ type: "logicalop", opcode: "and" });
   });
 
+  test("the ternary is looser than every binary operator", () => {
+    const statement = only("x = a || b ? c + 1 : d") as Assignment;
+    expect(statement.value).toMatchObject({
+      type: "ternaryop",
+      condition: { type: "logicalop", opcode: "or" },
+      then: { type: "binaryop", opcode: "add" },
+      else: { type: "identifier", name: "d" },
+    });
+  });
+
+  test("nested ternaries group to the right", () => {
+    const statement = only("x = a ? b : c ? d : e") as Assignment;
+    expect(statement.value).toMatchObject({
+      type: "ternaryop",
+      condition: { type: "identifier", name: "a" },
+      then: { type: "identifier", name: "b" },
+      else: {
+        type: "ternaryop",
+        condition: { type: "identifier", name: "c" },
+        then: { type: "identifier", name: "d" },
+        else: { type: "identifier", name: "e" },
+      },
+    });
+  });
+
   test("compound assignment carries the bitwise opcode", () => {
     const opcodeOf = (source: string): string => (only(source) as CompoundAssignOp).opcode;
     expect(opcodeOf("x &= 1")).toBe("and");

@@ -461,6 +461,14 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
   JavaScript makes; precedence follows C. `BitwiseOpcode` lists exactly the
   six opcodes an operator can produce — `nor` and `sla` have no spelling
   and are reached, like any opcode, by calling them (`nor(a, b)`).
+- **The ternary is a value, not control flow.** `c ? a : b` is IC10's
+  `select`, which takes all three as operands, so **both arms are
+  evaluated** — a ternary over two device reads emits both loads. The one
+  exception is a condition that folds: `compileTernaryOp` then compiles only
+  the arm it picks, and never compiles the other at all — the same thing a
+  constant `if` condition already does to its arms, and for the same reason.
+  Leaving the dead arm to dead code elimination instead would let an arm the
+  program cannot reach still raise a compile error.
 - **No algebraic identities for the bitwise opcodes.** Every one of them
   truncates its operands to integers, so even `x << 0` is not the identity
   on `x` and folding it away would change the result for a non-integer `x`.
