@@ -4,22 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Compiler</title>
-  <script type="module" crossorigin src="/IC10-Compiler/assets/index-TnSnoswU.js"></script>
-  <link rel="stylesheet" crossorigin href="/IC10-Compiler/assets/index-s9phrjVv.css">
+  <script type="module" crossorigin src="/assets/main-Bt0e1oT-.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/theme-BLz7FNa9.js">
+  <link rel="stylesheet" crossorigin href="/assets/theme-BiZ8jxd9.css">
 </head>
 <body>
   <hbox>
     <vbox id="compiler-wrapper" class="panel">
       <h1>
-        <span class="title"><span>Compiler</span> // v2.0</span>
+        <span class="title">ICC <span>v3.0</span></span>
         <span class="script-controls">
           <span id="saved-icon"></span>
-          <select id="script-select" title="Load a saved script"></select>
-          <button id="script-rename" title="Rename this script">Rename</button>
+          <span class="script-name-group dropdown" hidden>
+            <input id="script-name" class="group-item" type="text" spellcheck="false"
+                   autocomplete="off" title="Script name - type here to rename">
+            <button id="script-list-toggle" class="group-item" title="Load a saved script">▾</button>
+            <button id="script-new" class="group-item" title="Start a new script">+</button>
+            <button id="script-delete" class="group-item" title="Delete this script">−</button>
+            <ul id="script-list" class="dropdown-list"></ul>
+          </span>
           <button id="script-save" title="Save this script in the browser">Save</button>
-          <button id="script-new" title="Start a new script">New</button>
-          <button id="script-delete" title="Delete the selected script">Delete</button>
-          <button id="script-run" title="Run the script">Run</button>
+          <button id="script-run" title="Run the script (Ctrl+Enter)"><span>Run</span></button>
         </span>
       </h1>
       <div id="editor" class="editor"></div>
@@ -29,6 +34,11 @@
         <span class="title ic10">IC10</span>
         <span id="stats"></span>
         <span class="script-controls">
+          <a class="group-item" href="docs.html" title="Open the documentation">Docs</a>
+          <span class="dropdown" hidden>
+            <button id="theme-toggle" title="Change the color theme"></button>
+            <ul id="theme-list" class="dropdown-list"></ul>
+          </span>
           <button id="copy-output" title="Copy the output to the clipboard">Copy</button>
         </span>
       </h1>  
