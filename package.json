@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "deploy": "gh-pages -d dist",
     "typecheck": "tsc --noEmit",
+    "sync": ".\\sync-main.ps1 -Push",
     "test": "vitest run",
     "test:cases": "node tests/test.mjs",
     "lezer": "lezer-generator lezer/lang.grammar -o lezer/parser.js",
