@@ -1,16 +1,27 @@
 # Publish this branch to the target branch as a single squashed commit, minus
-# everything the target's .gitignore lists.
+# everything .syncignore lists.
 #
 # The two branches deliberately differ: IC10-V3 tracks CLAUDE.md, DEVELOPER.md
 # and .claude/ so they are backed up; main is the public branch and must not
-# carry them. .gitignore alone cannot express that, because it has no effect on
-# files git already tracks - a plain merge would bring all three across.
+# carry them. .gitignore cannot express that on its own, because it has no
+# effect on files git already tracks - a plain merge would bring all three
+# across.
 #
-# So no merge is taken at all. The source tree is copied over wholesale, the
-# target's own .gitignore is restored, and whatever that .gitignore matches is
-# dropped from the index. The target's .gitignore is therefore the single source
-# of truth for the difference between the branches, and the sync can never hit a
-# merge conflict - git is never asked to reconcile the two trees.
+# So no merge is taken at all. The source tree is copied over wholesale and
+# whatever .syncignore matches is then dropped from the index. The sync can
+# therefore never hit a merge conflict, because git is never asked to reconcile
+# the two trees.
+#
+# .syncignore lives on this branch, next to the script, so excluding something
+# new is one edit here rather than a commit on the target. It is a closed list
+# read with `git ls-files --exclude-from`: the target's own .gitignore, a global
+# gitignore and any nested .gitignore have no say, so nothing can quietly strip
+# a real source file from the target.
+#
+# That split - .syncignore for what must not be published, .gitignore for
+# ordinary build artifacts - is what lets .gitignore stay identical on both
+# branches. The target holds no state of its own at all now: its tree is a pure
+# function of this branch's tree and this file.
 #
 # Because each sync copies the whole tree rather than replaying a diff, squashing
 # costs nothing: the result depends only on the two tips, never on the history
@@ -33,14 +44,11 @@ param(
     [string] $Source = "IC10-V3",
     [string] $Target = "main",
     [string] $Remote = "origin",
+    [string] $ExcludeFile = ".syncignore",
     [switch] $Push
 )
 
 $ErrorActionPreference = "Stop"
-
-# Files the target keeps its own version of rather than taking from the source.
-# .gitignore is the whole mechanism, so it must not be overwritten by the copy.
-$KeepFromTarget = @(".gitignore")
 
 # Subject line of a sync commit. The trailing "(<rev>)" is parsed back off the
 # target's log to find where the last sync left the source, so the two halves
@@ -68,7 +76,12 @@ function Get-LastSyncedRev {
         $match = [regex]::Match($subject, $SyncSubjectPattern)
         if (-not $match.Success) { continue }
         $rev = $match.Groups[1].Value
-        & git merge-base --is-ancestor $rev $Source 2>$null
+        # Resolve before asking about ancestry: a rev that has been rebased or
+        # gc'd away is unknown to merge-base, which would fail loudly rather
+        # than answer no.
+        & git rev-parse --verify --quiet "$rev^{commit}" > $null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        & git merge-base --is-ancestor $rev $Source
         if ($LASTEXITCODE -eq 0) { return $rev }
         return $null
     }
@@ -83,6 +96,12 @@ foreach ($branch in @($Source, $Target)) {
     & git rev-parse --verify --quiet "refs/heads/$branch" > $null
     if ($LASTEXITCODE -ne 0) { throw "No local branch '$branch'." }
 }
+
+# Read off the source rather than the working tree: it is the copy that will be
+# in place when the exclusions are applied, and its absence means every excluded
+# file would be published.
+& git rev-parse --verify --quiet "${Source}:${ExcludeFile}" > $null
+if ($LASTEXITCODE -ne 0) { throw "$Source does not track $ExcludeFile - refusing to sync without an exclusion list." }
 
 $dirty = & git status --porcelain
 if ($dirty) { throw "Working tree is not clean. Commit or stash first:`n$dirty" }
@@ -106,9 +125,6 @@ try {
     $lastSynced = Get-LastSyncedRev
 
     Invoke-Git checkout $Source -- .
-    foreach ($path in $KeepFromTarget) {
-        Invoke-Git checkout HEAD -- $path
-    }
 
     if ($stale.Count -gt 0) {
         Write-Host "Removing paths dropped on ${Source}:" -ForegroundColor Yellow
@@ -116,12 +132,12 @@ try {
         Invoke-Git rm -r --quiet --force --ignore-unmatch -- @stale
     }
 
-    # Tracked files matching the target's .gitignore, which the copy above just
-    # staged. --cached leaves them in the working tree.
-    $ignored = @(& git ls-files --cached --ignored --exclude-standard)
+    # Tracked files matching .syncignore, which the copy above just staged.
+    # --cached leaves them in the working tree.
+    $ignored = @(& git ls-files --cached --ignored --exclude-from=$ExcludeFile)
     if ($LASTEXITCODE -ne 0) { throw "git ls-files exited with $LASTEXITCODE" }
     if ($ignored.Count -gt 0) {
-        Write-Host "Excluding from ${Target} (per its .gitignore):" -ForegroundColor Yellow
+        Write-Host "Excluding from ${Target} (per ${ExcludeFile}):" -ForegroundColor Yellow
         $ignored | ForEach-Object { Write-Host "  $_" }
         Invoke-Git rm -r --cached --quiet -- @ignored
     }
