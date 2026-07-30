@@ -1,1 +1,0 @@
-npx lezer-generator ic10.grammar -o parser_ic10.js

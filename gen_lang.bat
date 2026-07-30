@@ -1,1 +1,0 @@
-npx lezer-generator language.grammar -o parser.js
