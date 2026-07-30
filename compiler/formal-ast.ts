@@ -57,10 +57,12 @@ export type Statement =
   | Return
   | DefineDef
   | DeviceDef
+  | StackDeclaration
   | PreprocessorDir
   | FunctionDef
   | FunctionCall
-  | ArrayDeclaration;
+  | ArrayDeclaration
+  | Import;
 
 export type Expression =
   | Identifier
@@ -219,6 +221,13 @@ export type DeviceDef = Range & {
   device: Device;
 };
 
+// stack <identifier> = <expression>
+export type StackDeclaration = Range & {
+  type: "stackdeclaration";
+  name: Identifier;
+  value?: Expression;
+}
+
 // let <identifier> = [<expression>, ...]
 export type ArrayDeclaration = Range & {
   type: "arraydeclaration";
@@ -245,6 +254,13 @@ export type FunctionDef = Range & {
   name: Identifier;
   args: Identifier[];
   body: Block;
+};
+
+export type Import = Range & {
+  type: "import";
+  name: Identifier;
+  path: StringExpr;
+  device?: Device;
 };
 
 // Expressions
@@ -873,6 +889,18 @@ export function convertStatement(node: SyntaxNode): Statement {
       };
     }
 
+    case "StackDeclaration": {
+      const nameNode = parts.find(c => c.type === "VariableName");
+      const valueNode = parts.find(c => EXPRESSION_TYPES.has(c.type));
+      if (!nameNode) fail("Malformed stack declaration", node);
+      return {
+        ...rangeOf(node),
+        type: "stackdeclaration",
+        name: convertIdentifier(nameNode),
+        value: valueNode ? convertExpression(valueNode) : undefined,
+      };
+    }
+
     case "PreprocessorDirective": {
       const nameNode = parts.find(c => c.type === "DirectiveName");
       if (!nameNode) fail("Malformed directive", node);
@@ -928,6 +956,20 @@ export function convertStatement(node: SyntaxNode): Statement {
         } as ArrayDeclaration;
       }
     }
+
+    case "Import": {
+      const nameNode = parts.find(c => c.type === "VariableName");
+      const pathNode = parts.find(c => c.type === "String");
+      const deviceNode = parts.find(c => c.type === "Device");
+      if (!nameNode || !pathNode) fail("Malformed import", node);
+      return {
+        ...rangeOf(node),
+        type: "import",
+        name: convertIdentifier(nameNode),
+        path: { type: "string", from: pathNode.from, to: pathNode.to, value: pathNode.text },
+        device: deviceNode ? convertDevice(deviceNode) : undefined,
+      };
+    }
     
     default:
       return fail(`Expected a statement, got ${node.type}`, node);
@@ -981,6 +1023,7 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "return": return [node.value];
     case "definedef": return [node.name, node.value];
     case "devicedef": return [node.name, node.device];
+    case "stackdeclaration": return [node.name, node.value].filter(c => c !== undefined);
     case "functiondef": return [...node.args, node.body];
     case "functioncall": return node.params;
     case "deviceprop": return [node.device, node.prop];
@@ -994,5 +1037,6 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "arraydeclaration":
       return [node.name, node.size, ...(node.list ? node.list.elements : [])];
     case "listindexing": return [node.list, node.index];
+    case "import": return [node.name, node.path, node.device].filter(c => c !== undefined);
   }
 }

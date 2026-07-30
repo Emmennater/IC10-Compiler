@@ -32,6 +32,7 @@ import {
   type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
   type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
   type StringExpr, type UnaryOp, type While, type For, type ForIn, type ForOf,
+  type StackDeclaration, type Import
 } from "./formal-ast.ts";
 import {
   assertNever,
@@ -168,7 +169,8 @@ export class Lowerer {
   }
 
   /** Lower the whole tree and assemble headers, functions, and main code. */
-  lower(): LoweredProgram {
+  lower(fileHandler: Function): LoweredProgram {
+    this.registerImports(fileHandler);
     this.registerFunctions();
     this.collectFnGlobalNames();
 
@@ -246,6 +248,38 @@ export class Lowerer {
       if (fn.callCount < 2) continue; // single-site functions inline
       for (const name of fnVarRefs(fn, fnTable).refs) fnGlobalNames.add(name);
     }
+  }
+
+  private registerImports(fileHandler: Function): void {
+    /**
+     * Imports are used to access variables from other modules.
+     * There are two kinds of imports: one with/without a device.
+     * The device is included when the variable references stack memory.
+     * Here are some examples:
+     * - Lists: `let arr[4] = [10, 20, 30, 40]; import arr from "..." using d0`
+     * - Stack variables: `stack idle; import idle from "..." using d0`
+     * If a variable is imported without a device, it is always constant.
+     * - Constants: `const x = 10; import x from "..."`
+     * Once a variable is imported, it can be referenced by name.
+     * ExampleFileA:
+     * stack idle = false
+     * const size = 2
+     * let arr[size] = [1, 2]
+     * ExampleFileB:
+     * import idle from "ExampleFileA" using d0
+     * import arr from "ExampleFileA" using d0
+     * import size from "ExampleFileA"
+     * d1.Setting = idle
+     * d2.Setting = arr[0]
+     * d3.Setting = size
+     * ExampleFileB Output:
+     * get r0 d0 511 # idle lives at address 511 in ExampleFileA
+     * s d1 Setting r0
+     * get r0 d0 509 # arr[0] lives at address 509 in ExampleFileA
+     * s d2 Setting r0
+     * s d3 Setting 2 
+     */
+
   }
 
   /**
@@ -1565,6 +1599,9 @@ class FrameLowerer {
       case "definedef":
         this.processDefinition(statement);
         break;
+      case "stackdeclaration":
+        this.processStackDeclaration(statement);
+        break;
       case "functioncall":
         this.compileCall(statement, false);
         break;
@@ -1635,6 +1672,8 @@ class FrameLowerer {
         this.processListDeclaration(statement);
         break;
       }
+      case "import":
+        break; // Handled before lowering
       default:
         assertNever(statement, "statement");
     }
@@ -1842,5 +1881,10 @@ class FrameLowerer {
       const addr = { kind: "const", text: String(start + i) } as Operand;
       this.emit({ op: "poke", addr: addr, src, node: statement });
     }
+  }
+
+  private processStackDeclaration(statement: StackDeclaration): void {
+    // TODO: Implement
+    // Behaves exactly like a one element list declaration
   }
 }

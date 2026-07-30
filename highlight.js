@@ -20,8 +20,8 @@ export const iccParser = parser.configure({
       "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
       UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot": t.operator,
       "if then elif else end loop while do repeat until break continue \
-      return At DirectiveName for in of fn": t.keyword,
-      "let const define device": declaration,
+      return At DirectiveName for in of fn import from using": t.keyword,
+      "let const define device stack": declaration,
       "Instruction FunctionName": t.function(t.variableName),
       "Number Integer": t.number,
       Bool: t.bool,

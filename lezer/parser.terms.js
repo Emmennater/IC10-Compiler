@@ -77,4 +77,10 @@ export const
   ForInExpr = 75,
   _in = 76,
   ForOfExpr = 77,
-  of = 78
+  of = 78,
+  Import = 79,
+  _import = 80,
+  from = 81,
+  using = 82,
+  StackDeclaration = 83,
+  stack = 84

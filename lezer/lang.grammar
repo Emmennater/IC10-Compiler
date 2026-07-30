@@ -13,7 +13,8 @@ block { statement* }
 statement {
   Declaration | ArrayDeclaration | Assignment | IfExpr | LoopExpr | WhileExpr | RepeatUntilExpr |
   kw<"break"> | kw<"continue"> | Instruction | FunctionCall | DeviceDeclaration | Definition |
-  FunctionDef | Return | PreprocessorDirective | ForExpr | ForInExpr | ForOfExpr
+  FunctionDef | Return | PreprocessorDirective | ForExpr | ForInExpr | ForOfExpr | Import |
+  StackDeclaration
 }
 
 Declaration {
@@ -24,6 +25,11 @@ Declaration {
 ArrayDeclaration {
   kw<"let"> VariableName !list BracketLeft expression BracketRight
   (Assign List)?
+}
+
+StackDeclaration {
+  kw<"stack"> VariableName
+  (Assign expression)?
 }
 
 DeviceDeclaration { kw<"device"> VariableName Assign Device }
@@ -68,6 +74,8 @@ Return { kw<"return"> expression }
 PreprocessorDirective { At DirectiveName }
 
 DirectiveName { kw_<"constexpr"> }
+
+Import { kw<"import"> VariableName kw<"from"> String (kw<"using"> Device)? }
 
 expression { Number | Bool | Value | Parens | UnaryOp | BinaryOp | FunctionCall | String }
 

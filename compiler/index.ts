@@ -80,8 +80,13 @@ function validateConfig(registerOrder: readonly number[], inlineThreshold: numbe
   }
 }
 
-/** Compile a parsed program to IC10 assembly text. */
-export function compile(ast: SyntaxNode, config: Partial<Config> = {}): string {
+/**
+ * Compile a parsed program to IC10 assembly text.
+ * @param ast The programs AST
+ * @param config Compiler configuration
+ * @param fileHandler Callback for retrieving file contents
+ * */
+export function compile(ast: SyntaxNode, config: Partial<Config> = {}, fileHandler = () => {}): string {
   const removeLabels = config.removeLabels ?? DEFAULT_CONFIG.removeLabels;
   const registerOrder = config.registerOrder ?? DEFAULT_CONFIG.registerOrder;
   const inlineThreshold = config.inlineThreshold ?? DEFAULT_CONFIG.inlineThreshold;
@@ -94,7 +99,7 @@ export function compile(ast: SyntaxNode, config: Partial<Config> = {}): string {
 
   const ids = new IdAllocator();
   const { program, ifRegions, loopRegions } =
-    new Lowerer(getFormalAST(ast), errors, ids, inlineThreshold).lower();
+    new Lowerer(getFormalAST(ast), errors, ids, inlineThreshold).lower(fileHandler);
   const optimized = optimize(program, ifRegions, loopRegions);
   const { program: allocated, registerOf } =
     allocateRegisters(optimized, { registerOrder, ids, errors, rootNode: ast });
