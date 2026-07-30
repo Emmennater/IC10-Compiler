@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node tests/test.mjs)",
+      "PowerShell(npx vitest run tests/formal-ast.test.ts 2>&1)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "Bash(xargs grep -l \"typeScript\\\\|\\\\.ts\\\\b\")",
+      "PowerShell(npm run typecheck 2>&1)",
+      "PowerShell(npm run build 2>&1)",
+      "Bash(npx lezer-generator *)",
+      "Bash(git show *)",
+      "PowerShell(npm run typecheck)",
+      "PowerShell(npm test 2>&1)",
+      "PowerShell(npx vitest run tests/cases.test.ts 2>&1)",
+      "PowerShell(npx vitest run tests/_scratch-demo.test.ts)",
+      "Bash(git check-ignore *)",
+      "Bash(npx tsc *)",
+      "Bash(node probe.mjs)",
+      "Bash(npx vite-node *)",
+      "Bash(git stash *)",
+      "Read(//tmp/**)",
+      "PowerShell(npx vite-node \"$env:TEMP\\\\claude\\\\c--Users-emmet-Documents-GitHub-IC10-IC10-V3\\\\4d1752d5-1e92-44e5-8dab-886887c33cb5\\\\scratchpad\\\\probe3.mjs\")",
+      "PowerShell(npx vite-node \"$env:TEMP\\\\claude\\\\c--Users-emmet-Documents-GitHub-IC10-IC10-V3\\\\4d1752d5-1e92-44e5-8dab-886887c33cb5\\\\scratchpad\\\\probe5.mjs\")",
+      "PowerShell(npx vite-node \"$env:TEMP\\\\claude\\\\c--Users-emmet-Documents-GitHub-IC10-IC10-V3\\\\4d1752d5-1e92-44e5-8dab-886887c33cb5\\\\scratchpad\\\\probe6.mjs\")",
+      "PowerShell(npx vite-node \"$env:TEMP\\\\claude\\\\c--Users-emmet-Documents-GitHub-IC10-IC10-V3\\\\4d1752d5-1e92-44e5-8dab-886887c33cb5\\\\scratchpad\\\\probe7.mjs\")"
+    ]
+  }
+}
