@@ -134,6 +134,7 @@ h1 {
   flex: 1;
   min-width: 0;
   max-width: 30vw;
+  z-index: 11;
 }
 
 .script-name-group > .group-item {
@@ -150,6 +151,7 @@ h1 {
   border-left-width: 1px;
   cursor: text;
   outline: none;
+  z-index: inherit;
 }
 
 #script-name:focus {
@@ -163,6 +165,7 @@ h1 {
   width: 32px;
   text-align: center;
   line-height: 1;
+  z-index: inherit;
 }
 
 #script-delete {
@@ -247,6 +250,7 @@ h1 {
    only while its own dropdown span is open, so it flows into the list. */
 .dropdown:not([hidden]) > #theme-toggle {
   border-radius: 8px 8px 0 0;
+  z-index: 11;
 }
 
 /* The Run button is the one that does something to the world */
