@@ -251,6 +251,7 @@ Literals are carried through the compiler as numbers rather than as the text you
 | `&&` `\|\|` `!` | `and` `or` `seqz` | **logical** — each side is coerced to an exact 0/1 first |
 | `&` `\|` `^` `~` | `and` `or` `xor` `not` | **bitwise**, over the 64-bit word |
 | `<<` `>>` `>>>` | `sll` `sra` `srl` | `>>` keeps the sign bit, `>>>` shifts zeroes into it |
+| `? :` | `select` | picks between two **values** — both arms are evaluated |
 
 ```icc {% compile=true %}
 let x = d0.Setting
@@ -272,6 +273,35 @@ d1.Setting = 2 && 4
 d2.Setting = 2 & 4
 ```
 
+### The conditional operator
+
+`cond ? a : b` is IC10's `select`, which takes the condition and both results as operands. So it is an expression that picks between two values, not an `if` — nothing branches, and the whole thing costs one instruction on top of the condition.
+
+```icc {% compile=true %}
+device sensor = d0
+d1.Setting = sensor.Temperature > 300 ? 100 : 0
+```
+
+Taking all three as operands has a consequence worth being deliberate about: **both arms are evaluated**. Where they read devices, both reads happen, whichever way the condition goes.
+
+```icc {% compile=true %}
+d2.Setting = d0.On ? d0.Setting : d1.Setting
+```
+
+Reach for an `if` when only one side should run. The exception is a condition the compiler can settle for itself, which picks its arm outright — the other one is never compiled at all:
+
+```icc {% compile=true %}
+const CALIBRATED = 1
+d0.Setting = CALIBRATED ? d1.Temperature : 0
+```
+
+It is the loosest operator there is, and groups to the right as in C, so a chain of them reads as a series of tests and still emits no branches:
+
+```icc {% compile=true %}
+let t = d0.Temperature
+d1.Setting = t > 400 ? 3 : t > 350 ? 2 : t > 300 ? 1 : 0
+```
+
 ### Precedence
 
 Tightest first. Precedence follows C, which means the comparisons bind **tighter** than the bitwise operators — `a & 1 == 1` parses as `a & (1 == 1)`. Parenthesize when that isn't what you meant.
@@ -289,6 +319,7 @@ Tightest first. Precedence follows C, which means the comparisons bind **tighter
 | `\|` | or |
 | `&&` | logical and |
 | `\|\|` | logical or |
+| `? :` | conditional (groups to the right) |
 
 ### Compound assignment
 
