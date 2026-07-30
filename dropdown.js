@@ -13,17 +13,22 @@ function closeAll(except) {
 /**
  * Wire `toggle` (a button) to `list` (a `ul.dropdown-list`). `fill` rebuilds
  * the list's items and runs on every open, so a menu never shows a stale set.
+ *
+ * `hiddenHost` is the element that carries the open/closed `hidden` state -
+ * normally `list` itself, but a caller whose CSS needs to key off open/closed
+ * (e.g. rounding a container's corners only while its dropdown is shut) can
+ * pass an ancestor instead.
  */
-export function setupDropdown(toggle, list, fill) {
+export function setupDropdown(toggle, list, fill, hiddenHost = list) {
   const dropdown = {
     list,
     open() {
       closeAll(dropdown);
       fill();
-      list.hidden = false;
+      hiddenHost.hidden = false;
     },
     close() {
-      list.hidden = true;
+      hiddenHost.hidden = true;
     },
   };
 
@@ -31,7 +36,7 @@ export function setupDropdown(toggle, list, fill) {
     // Without this the document listener below sees the same click and closes
     // the menu we are about to open.
     event.stopPropagation();
-    if (list.hidden) dropdown.open();
+    if (hiddenHost.hidden) dropdown.open();
     else dropdown.close();
   });
 

@@ -8,6 +8,7 @@ const DEFAULT_NAME = "new-script";
 const nameInput = document.querySelector("#script-name");
 const listToggle = document.querySelector("#script-list-toggle");
 const listBox = document.querySelector("#script-list");
+const scriptNameGroup = document.querySelector(".script-name-group");
 const savedIcon = document.querySelector("#saved-icon");
 
 // `currentScript` is the name in the box; `savedName` is the key the buffer is
@@ -74,7 +75,7 @@ function refreshScriptList() {
   }
 }
 
-const scriptMenu = setupDropdown(listToggle, listBox, refreshScriptList);
+const scriptMenu = setupDropdown(listToggle, listBox, refreshScriptList, scriptNameGroup);
 
 function loadScript(name) {
   const scripts = readScripts();

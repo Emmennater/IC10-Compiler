@@ -272,6 +272,14 @@ function initCopyButtons() {
 function initThemeToggle() {
   const themeToggle = document.querySelector("#theme-toggle");
   const themeList = document.querySelector("#theme-list");
+  const themeGroup = themeToggle.closest(".dropdown");
+
+  // #theme-list is styled to exactly match #theme-toggle's width. Both use
+  // the same monospace font, so sizing the toggle (in `ch`) to the longest
+  // theme name + " ▾" guarantees every entry fits without truncating, no
+  // matter which theme is currently selected.
+  const widestName = Math.max(...themeNames.map(name => name.length));
+  themeToggle.style.minWidth = `${widestName + 2}ch`;
 
   const showTheme = () => { themeToggle.textContent = `${themeName()} ▾`; };
 
@@ -286,7 +294,7 @@ function initThemeToggle() {
         showTheme();
       }));
     }
-  });
+  }, themeGroup);
 
   showTheme();
 }

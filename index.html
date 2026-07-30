@@ -14,13 +14,13 @@
         <span class="title">ICC <span>v3.0</span></span>
         <span class="script-controls">
           <span id="saved-icon"></span>
-          <span class="script-name-group dropdown">
+          <span class="script-name-group dropdown" hidden>
             <input id="script-name" class="group-item" type="text" spellcheck="false"
                    autocomplete="off" title="Script name - type here to rename">
             <button id="script-list-toggle" class="group-item" title="Load a saved script">▾</button>
             <button id="script-new" class="group-item" title="Start a new script">+</button>
             <button id="script-delete" class="group-item" title="Delete this script">−</button>
-            <ul id="script-list" class="dropdown-list" hidden></ul>
+            <ul id="script-list" class="dropdown-list"></ul>
           </span>
           <button id="script-save" title="Save this script in the browser">Save</button>
           <button id="script-run" title="Run the script (Ctrl+Enter)"><span>Run</span></button>
@@ -34,9 +34,9 @@
         <span id="stats"></span>
         <span class="script-controls">
           <a class="group-item" href="docs.html" title="Open the documentation">Docs</a>
-          <span class="dropdown">
+          <span class="dropdown" hidden>
             <button id="theme-toggle" title="Change the color theme"></button>
-            <ul id="theme-list" class="dropdown-list" hidden></ul>
+            <ul id="theme-list" class="dropdown-list"></ul>
           </span>
           <button id="copy-output" title="Copy the output to the clipboard">Copy</button>
         </span>

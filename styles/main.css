@@ -112,6 +112,7 @@ h1 {
 
 .script-controls button {
   flex-shrink: 0;
+  text-align: left;
 }
 
 .script-controls button:hover {
@@ -169,12 +170,29 @@ h1 {
   border-radius: 0 8px 8px 0;
 }
 
+/* While the script list is open, square off the bottom corners so the group
+   flows straight into the dropdown below it; .script-name-group carries the
+   open/closed `hidden` state instead of #script-list so this can key off it. */
+.script-name-group:not([hidden]) #script-name {
+  border-radius: 8px 0 0 0;
+}
+
+.script-name-group:not([hidden]) #script-delete {
+  border-radius: 0 8px 0 0;
+}
+
+/* Every opener (.script-name-group, the theme dropdown's span) carries its
+   own open/closed `hidden` state, so its .dropdown-list hides the same way. */
+.dropdown[hidden] > .dropdown-list {
+  display: none;
+}
+
 /* Saved-script and theme dropdowns */
 .dropdown-list {
   position: absolute;
-  top: calc(100% + 4px);
+  top: 100%;
   left: 0;
-  min-width: 100%;
+  min-width: calc(100% - 2px);
   max-height: 50vh;
   overflow-y: auto;
   margin: 0;
@@ -182,16 +200,13 @@ h1 {
   list-style: none;
   background: var(--theme-background-element);
   border: 1px solid var(--theme-border);
-  border-radius: 8px;
+  border-top: none;
+  border-radius: 0px 0px 8px 8px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
   font-family: monospace;
   font-size: 24px;
   color: var(--theme-text-element);
   z-index: 10;
-}
-
-.dropdown-list[hidden] {
-  display: none;
 }
 
 .dropdown-list li {
@@ -218,10 +233,21 @@ h1 {
   background: none;
 }
 
-/* The theme menu sits near the right edge, so it hangs off its right side */
+/* The theme menu sits near the right edge, so it hangs off its right side.
+   `width` (not just the shared min-width, which only floors it) pins it to
+   the toggle button's exact width - safe because the toggle's own min-width
+   is set in JS to fit the longest theme name, so nothing here truncates. */
 #theme-list {
   left: auto;
   right: 0;
+  width: calc(100% - 2px);
+}
+
+/* #theme-toggle is a lone button (not a connected group like
+   .script-name-group), so it is fully rounded by default; square its bottom
+   only while its own dropdown span is open, so it flows into the list. */
+.dropdown:not([hidden]) > #theme-toggle {
+  border-radius: 8px 8px 0 0;
 }
 
 /* The Run button is the one that does something to the world */
