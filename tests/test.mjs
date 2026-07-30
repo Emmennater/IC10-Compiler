@@ -2324,6 +2324,99 @@ export const cases = {
     ],
     error: "Line 3: foo was already defined",
   },
+  // Ternary operator
+  "the ternary operator lowers to select": {
+    source: "b = a > 5 ? 1 : 0",
+    expected: [
+      "move r0 a",
+      "sgt r0 r0 5",
+      "select r0 r0 1 0",
+      "move b r0",
+    ],
+  },
+  "a ternary evaluates both of its arms": {
+    // `select` takes both results as operands, so this is not an `if`: both
+    // devices are read whichever way the comparison goes.
+    source: "d2.Setting = d0.Temperature > 300 ? d0.Setting : d1.Setting",
+    expected: [
+      "l r0 d0 Temperature",
+      "sgt r0 r0 300",
+      "l r1 d0 Setting",
+      "l r2 d1 Setting",
+      "select r0 r0 r1 r2",
+      "s d2 Setting r0",
+    ],
+  },
+  "a settled ternary condition compiles only the arm it picks": {
+    // The arm not taken emits nothing at all - not even a load for dead code
+    // elimination to retire afterwards.
+    source: [
+      "let mode = 1",
+      "b = mode ? x : y",
+    ],
+    expected: [
+      "move r0 x",
+      "move b r0",
+    ],
+  },
+  "the discarded arm of a settled ternary is never compiled": {
+    // Not merely emitted and then eliminated: reading `u` is an error, and a
+    // ternary the program cannot take that arm of must not raise it - the
+    // same thing a constant `if` condition does to its arms.
+    source: [
+      "let mode = 0",
+      "let u",
+      "b = mode ? u : 1",
+    ],
+    expected: "move b 1",
+  },
+  "a ternary whose parts are all constant folds away entirely": {
+    source: [
+      "const LIMIT = 10",
+      "b = LIMIT > 5 ? LIMIT * 2 : 0",
+    ],
+    expected: "move b 20",
+  },
+  "nested ternaries group to the right": {
+    // `p ? 1 : (q ? 2 : 3)`: the inner select feeds the outer one's else arm.
+    source: "b = p ? 1 : q ? 2 : 3",
+    expected: [
+      "move r0 p",
+      "move r1 q",
+      "select r1 r1 2 3",
+      "select r0 r0 1 r1",
+      "move b r0",
+    ],
+  },
+  "a ternary over two 0/1 arms needs no coercion": {
+    // The left side of `&&` is already an exact 0/1, so it goes into the
+    // `and` as it is while the placeholder on the right needs an snez.
+    source: "b = (p ? 1 : 0) && q",
+    expected: [
+      "move r0 p",
+      "select r0 r0 1 0",
+      "move r1 q",
+      "snez r1 r1",
+      "and r0 r0 r1",
+      "move b r0",
+    ],
+  },
+  "a ternary used as a condition is tested for truth": {
+    source: [
+      "if p ? q : r then",
+      "  b = 1",
+      "end",
+    ],
+    expected: [
+      "move r0 p",
+      "move r1 q",
+      "move r2 r",
+      "select r0 r0 r1 r2",
+      "beqz r0 endif0",
+      "move b 1",
+      "endif0:",
+    ],
+  },
   // Lists
   "list declaration": {
     source: [

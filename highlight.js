@@ -18,7 +18,8 @@ export const iccParser = parser.configure({
   props: [
     styleTags({
       "AddOp MulOp CompareOp LogicAnd LogicOr ParenLeft ParenRight Assign CompoundAssignOp \
-      UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot": t.operator,
+      UnaryOp BracketLeft BracketRight Dot Not Comma ShiftOp BitAnd BitOr BitXor BitNot \
+      Question Colon": t.operator,
       "if then elif else end loop while do repeat until break continue \
       return At DirectiveName for in of fn import from using": t.keyword,
       "let const define device stack": declaration,

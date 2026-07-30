@@ -113,6 +113,13 @@ export class ConstexprEvaluator {
         }
         return this.evalNode(node.left, envs) !== 0 || this.evalNode(node.right, envs) !== 0 ? 1 : 0;
       }
+      case "ternaryop":
+        // Evaluating only the chosen arm, unlike the `select` the compiled
+        // form emits: nothing here has an effect to miss, and the arm not
+        // taken is free to be one the interpreter would bail on.
+        return this.evalNode(node.condition, envs) !== 0
+          ? this.evalNode(node.then, envs)
+          : this.evalNode(node.else, envs);
       case "functioncall": {
         const callee = this.fnTable.get(node.name.name);
         if (!callee) throw new BailSignal();

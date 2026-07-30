@@ -25,7 +25,7 @@ import type { Inst, Operand, UnnumberedInst } from "../compiler/ir.ts";
 import type { SyntaxNode } from "../compiler/syntax.ts";
 import type {
   BinaryOp, BinaryOpcode, ComparisonOp, ComparisonOpcode, Constant, Expression,
-  Identifier, LogicalOp, StringExpr, UnaryOp,
+  Identifier, LogicalOp, StringExpr, TernaryOp, UnaryOp,
 } from "../compiler/formal-ast.ts";
 import { node, num } from "./ast.ts";
 
@@ -81,6 +81,8 @@ const logic = (left: Expression, opcode: "and" | "or", right: Expression): Logic
   ({ type: "logicalop", ...at, left, right, opcode });
 const unary = (opcode: UnaryOp["opcode"], value: Expression): UnaryOp =>
   ({ type: "unaryop", ...at, value, opcode });
+const ternary = (condition: Expression, then: Expression, otherwise: Expression): TernaryOp =>
+  ({ type: "ternaryop", ...at, condition, then, else: otherwise });
 
 export function runUnitTests(): UnitResult[] {
   results.length = 0;
@@ -178,6 +180,16 @@ export function runUnitTests(): UnitResult[] {
   equal("fold unknown name", foldExpression(id("other"), withK), null);
   equal("foldTruthy(null)", foldTruthy(null), null);
   equal("foldTruthy(0)", foldTruthy({ kind: "const", text: "0" }), false);
+  // A ternary folds only through its condition: the arms are values, so
+  // neither can settle the choice the way a false side settles an `&&`.
+  equal("fold a settled ternary picks an arm",
+    foldExpression(ternary(k(1), k(7), k(9)), noConstants)?.text, "7");
+  equal("fold a settled ternary ignores the arm not taken",
+    foldExpression(ternary(k(0), id("x"), k(9)), noConstants)?.text, "9");
+  equal("fold an unsettled ternary stays unknown",
+    foldExpression(ternary(id("x"), k(1), k(1)), noConstants), null);
+  equal("fold a ternary condition via lookup",
+    foldExpression(ternary(id("k"), k(1), k(2)), withK)?.text, "1");
 
   // pressure: known names are free, placeholders cost a register
   const known = (n: string) => n === "v";
@@ -186,6 +198,12 @@ export function runUnitTests(): UnitResult[] {
   equal("pressure of a placeholder", pressure(id("p"), known), 1);
   equal("pressure of balanced binary grows", pressure(arith(id("p"), "add", id("q")), known), 2);
   equal("pressure of unbalanced binary does not", pressure(arith(id("p"), "add", k(1)), known), 1);
+  // `select` reads all three operands at once: the condition is held while
+  // both arms are computed, so a ternary of placeholders needs three.
+  equal("pressure of a ternary of placeholders",
+    pressure(ternary(id("p"), id("q"), id("r")), known), 3);
+  equal("pressure of a ternary with literal arms",
+    pressure(ternary(id("p"), k(1), k(2)), known), 1);
 
   // ------------------------------- labels -------------------------------
   const labels = new LabelFactory();

@@ -72,6 +72,15 @@ export function foldExpression(node: Expression, constantOf: ConstantLookup): Co
       if (a === false && b === false) return constBoolOp(false);
       return null;
     }
+    case "ternaryop": {
+      // Only the condition can settle this: two arms that happen to fold to
+      // the same value still leave the choice between them unmade, and the
+      // arms are values rather than outcomes, so there is nothing to absorb
+      // the way `&&` absorbs a false side.
+      const condition = foldTruthy(foldExpression(node.condition, constantOf));
+      if (condition === null) return null;
+      return foldExpression(condition ? node.then : node.else, constantOf);
+    }
     default:
       // Strings, devices, property reads and calls only exist at run time.
       return null;
@@ -113,6 +122,21 @@ export function pressure(node: Expression, isKnownName: KnownNameLookup): number
       const a = pressure(node.left, isKnownName);
       const b = pressure(node.right, isKnownName);
       return Math.max(a === b ? a + 1 : Math.max(a, b), 1);
+    }
+    case "ternaryop": {
+      // `select` reads all three operands at once, so this is the binary rule
+      // above with one more value in flight. A subtree scoring 0 is an
+      // immediate that occupies no register at all, so only the rest are
+      // counted as held - which is what makes `x ? 1 : 2` cost one register
+      // rather than three, and is also exactly what the two-operand rule says
+      // when applied to two values.
+      const held = [node.condition, node.then, node.else]
+        .map(part => pressure(part, isKnownName))
+        .filter(cost => cost > 0)
+        .sort((x, y) => y - x);
+      // Cheapest order is hungriest first: each one evaluated earlier is one
+      // more register occupied while the next is computed.
+      return Math.max(1, ...held.map((cost, before) => cost + before));
     }
     case "listindexing":
       return pressure(node.index, isKnownName);
