@@ -68,6 +68,17 @@ export class ScopeChain {
     return new ScopeChain([new Map()], 0);
   }
 
+  /**
+   * The chain an imported function's body resolves names in: the exporting
+   * module's constants stand where the program's globals would, and nothing
+   * of the importing program is visible at all. That is the whole of what
+   * makes a copied body mean the same thing here as it did there - the names
+   * it could reach are exactly the ones it could reach before.
+   */
+  static forModule(constants: Scope): ScopeChain {
+    return new ScopeChain([constants], 0);
+  }
+
   /** Number of scopes visible (the root chain has depth 1). */
   get depth(): number {
     return this.scopes.length;

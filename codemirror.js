@@ -6,7 +6,7 @@ import { EditorState, Compartment } from "@codemirror/state";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { LRLanguage, HighlightStyle, syntaxHighlighting, indentUnit } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
-import { device, register, declaration, iccParser, ic10Parser } from "./highlight.js";
+import { device, register, declaration, instruction, label, iccParser, ic10Parser } from "./highlight.js";
 import { saveScript, documentChanged } from "./save-load.js";
 import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 import { setupDropdown, dropdownItem } from "./dropdown.js";
@@ -121,9 +121,11 @@ const theme = EditorView.theme({
 
 function highlightsFor(colors) {
   return syntaxHighlighting(HighlightStyle.define([
-    { tag: device, color: colors.special },
-    { tag: register, color: colors.special },
+    { tag: instruction, color: colors.instruction },
+    { tag: device, color: colors.device },
+    { tag: register, color: colors.register },
     { tag: declaration, color: colors.declaration },
+    { tag: label, color: colors.label },
     { tag: t.keyword, color: colors.keyword },
     { tag: t.comment, color: colors.comment },
     { tag: [t.string, t.special(t.string)], color: colors.string },

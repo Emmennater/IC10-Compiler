@@ -15,7 +15,10 @@ export const themes = {
     "string": "#a5d6ff",
     "comment": "#8b949e",
     "operator": "#7d91a8",
-    "special": "#75e6d7",
+    "register": "#75e6d7",
+    "device": "#75e6d7",
+    "instruction": "#d2a8ff",
+    "label": "#ff7b72",
     // Elements
     "background": "#282C34",
     "border": "#535964",
@@ -33,12 +36,36 @@ export const themes = {
     "string": "#CE9178",
     "comment": "#6A9955",
     "operator": "#D4D4D4",
-    "special": "#4EC9B0",
+    "register": "#4EC9B0",
+    "device": "#4EC9B0",
+    "instruction": "#DCDCAA",
+    "label": "#569CD6",
     // Elements
     "background": "#282C34",
     "border": "#535964",
     "background-element": "#363b45",
     "text-element": "#c9d1d9",
+    "line-number": "#858585"
+  },
+  "IC10": {
+    // Text
+    "declaration": "#6C30A4",
+    "keyword": "#DC6D0F",
+    "function": "#919192",
+    "number": "#2E8882",
+    "variable": "#d2d2d2",
+    "string": "#d2d2d2",
+    "comment": "#4F4F50",
+    "operator": "#D4D4D4",
+    "register": "#0066CF",
+    "device": "#00CA14",
+    "instruction": "#C8BE27",
+    "label": "#6C30A4",
+    // Elements
+    "background": "#001223",
+    "border": "#414d5a",
+    "background-element": "#001223",
+    "text-element": "#909da9",
     "line-number": "#858585"
   }
 };

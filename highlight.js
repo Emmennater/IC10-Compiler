@@ -13,6 +13,8 @@ import { parser as parser_ic10 } from "./lezer/parser-ic10.js";
 export const device = Tag.define();
 export const register = Tag.define();
 export const declaration = Tag.define();
+export const instruction = Tag.define();
+export const label = Tag.define();
 
 export const iccParser = parser.configure({
   props: [
@@ -23,8 +25,9 @@ export const iccParser = parser.configure({
       "if then elif else end loop while do repeat until break continue \
       return At DirectiveName for in of fn import from using": t.keyword,
       "let const define device stack": declaration,
-      "Instruction FunctionName": t.function(t.variableName),
+      "FunctionName": t.function(t.variableName),
       "Number Integer": t.number,
+      Instruction: instruction,
       Bool: t.bool,
       Comment: t.comment,
       String: t.string,
@@ -37,14 +40,15 @@ export const iccParser = parser.configure({
 export const ic10Parser = parser_ic10.configure({
   props: [
     styleTags({
-      "InstructionName FunctionName": t.function(t.variableName),
-      "ParenLeft ParenRight Colon Dot AddOp": t.operator,
+      "InstructionName": instruction,
+      "FunctionName": t.function(t.variableName),
+      "ParenLeft ParenRight Dot AddOp": t.operator,
       "Number Integer": t.number,
       String: t.string,
       Channel: device,
       DeviceName: device,
       Register: register,
-      LabelName: t.labelName,
+      "LabelName Colon": label,
       Comment: t.comment,
       VariableName: t.variableName
     })
@@ -55,8 +59,11 @@ export const ic10Parser = parser_ic10.configure({
 // reads the same `--theme-*` custom property the CodeMirror editor paints
 // with, so a code fence re-colors the instant the theme toggle fires.
 const highlighter = tagHighlighter([
-  { tag: [device, register], class: "tok-special" },
+  { tag: instruction, class: "tok-instruction" },
+  { tag: register, class: "tok-register" },
+  { tag: device, class: "tok-device" },
   { tag: declaration, class: "tok-declaration" },
+  { tag: label, class: "tok-label" },
   { tag: t.keyword, class: "tok-keyword" },
   { tag: t.comment, class: "tok-comment" },
   { tag: [t.string, t.special(t.string)], class: "tok-string" },

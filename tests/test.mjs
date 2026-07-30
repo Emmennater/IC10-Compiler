@@ -2699,13 +2699,242 @@ export const cases = {
     error: 'Line 0: In module "ExampleFileA": ' +
       "Line 1: stack memory declared outside the top level cannot be imported",
   },
-  "a module's own imports are not re-exported": {
+  "a module re-exports what it imported itself": {
     modules: {
       ExampleFileA: 'import size from "ExampleFileB"',
       ExampleFileB: "const size = 2",
     },
-    source: 'import size from "ExampleFileA"',
-    error: 'Line 0: size is not declared in "ExampleFileA"',
+    source: [
+      'import size from "ExampleFileA"',
+      "d0.Setting = size",
+    ],
+    expected: "s d0 Setting 2",
+  },
+  "a re-exported cell keeps the address of the chip that declared it": {
+    // ExampleFileA sees the cell on d5; this program has to say which pin it
+    // sees ExampleFileB on itself, because that is the chip holding the cell.
+    modules: {
+      ExampleFileB: "stack idle = 0",
+      ExampleFileA: 'import idle from "ExampleFileB" using d5',
+    },
+    source: [
+      'import idle from "ExampleFileA" using d0',
+      "d1.Setting = idle",
+    ],
+    expected: ["get r0 d0 511", "s d1 Setting r0"],
+  },
+  "a module's list size and constants may come from another module": {
+    modules: {
+      ExampleFileB: "const size = 2",
+      ExampleFileA: [
+        'import size from "ExampleFileB"',
+        "let arr[size] = [1, 2]",
+        "const total = size * 3",
+      ],
+    },
+    source: [
+      'import arr from "ExampleFileA" using d0',
+      'import total from "ExampleFileA"',
+      "d1.Setting = arr[1]",
+      "d2.Setting = total",
+    ],
+    expected: ["get r0 d0 511", "s d1 Setting r0", "s d2 Setting 6"],
+  },
+  "a module that imports itself is an error": {
+    modules: { ExampleFileA: 'import x from "ExampleFileA"' },
+    source: 'import x from "ExampleFileA"',
+    error: 'Line 0: In module "ExampleFileA": ' +
+      'Line 0: Circular import of module "ExampleFileA"',
+  },
+  "a cycle of modules is an error": {
+    modules: {
+      ExampleFileA: 'import x from "ExampleFileB"',
+      ExampleFileB: 'import x from "ExampleFileA"',
+    },
+    source: 'import x from "ExampleFileA"',
+    error: 'Line 0: In module "ExampleFileA": Line 0: In module "ExampleFileB": ' +
+      'Line 0: Circular import of module "ExampleFileA"',
+  },
+  // Imported functions
+  "an imported function is compiled into the importing program": {
+    modules: { ExampleFileA: ["fn double(x)", "  return x * 2", "end"] },
+    source: [
+      'import double from "ExampleFileA"',
+      "d0.Setting = double(d1.Setting)",
+    ],
+    expected: ["l r0 d1 Setting", "mul r0 r0 2", "s d0 Setting r0"],
+  },
+  "an imported function may use the module's constants": {
+    modules: {
+      ExampleFileA: ["const gain = 3", "fn scale(x)", "  return x * gain", "end"],
+    },
+    source: [
+      'import scale from "ExampleFileA"',
+      "d0.Setting = scale(d1.Setting)",
+    ],
+    expected: ["l r0 d1 Setting", "mul r0 r0 3", "s d0 Setting r0"],
+  },
+  "an imported function reads db on the pin the import named": {
+    // `db` is the chip the code runs on, which for a copied body is the chip
+    // it came from - the one `using` points at.
+    modules: { ExampleFileA: ["fn reading()", "  return db.Setting", "end"] },
+    source: [
+      'import reading from "ExampleFileA" using d0',
+      "d1.Setting = reading()",
+    ],
+    expected: ["l r0 d0 Setting", "s d1 Setting r0"],
+  },
+  "an imported function brings the functions it calls with it": {
+    modules: {
+      ExampleFileA: [
+        "fn scale(x)",
+        "  return clamp(x) * 2",
+        "end",
+        "fn clamp(x)",
+        "  return min(x, 10)",
+        "end",
+      ],
+    },
+    source: [
+      'import scale from "ExampleFileA"',
+      "d0.Setting = scale(d1.Setting)",
+    ],
+    expected: ["l r0 d1 Setting", "min r0 r0 10", "mul r0 r0 2", "s d0 Setting r0"],
+  },
+  "a pulled-in callee gives way to a name this program imported": {
+    // ExampleFileA's own `clamp` comes along with `scale`, but the name is
+    // spoken for, so it is registered under another one and the calls in the
+    // copied body follow it.
+    modules: {
+      ExampleFileA: [
+        "fn scale(x)", "  return clamp(x) + 1", "end",
+        "fn clamp(x)", "  return x * 2", "end",
+      ],
+      ExampleFileB: ["fn clamp(x)", "  return x + 100", "end"],
+    },
+    source: [
+      'import scale from "ExampleFileA"',
+      'import clamp from "ExampleFileB"',
+      "d0.Setting = scale(1)",
+      "d1.Setting = clamp(1)",
+    ],
+    expected: ["s d0 Setting 3", "s d1 Setting 101"],
+  },
+  "an imported function is called through jal like any other": {
+    modules: {
+      ExampleFileA: [
+        "fn hypot(a, b)",
+        "  return sqrt(a * a + b * b)",
+        "end",
+      ],
+    },
+    source: [
+      'import hypot from "ExampleFileA"',
+      "d0.Setting = hypot(d1.Setting, d2.Setting)",
+      "d3.Setting = hypot(3, 4)",
+    ],
+    inlineThreshold: 0,
+    expected: [
+      "j ProgramStart",
+      "hypot:",
+      "mul r0 r0 r0",
+      "mul r1 r1 r1",
+      "add r0 r0 r1",
+      "sqrt r0 r0",
+      "j ra",
+      "ProgramStart:",
+      "l r0 d1 Setting",
+      "l r1 d2 Setting",
+      "jal hypot",
+      "s d0 Setting r0",
+      "move r0 3",
+      "move r1 4",
+      "jal hypot",
+      "s d3 Setting r0",
+    ],
+  },
+  "an imported function cannot read the module's variables": {
+    modules: {
+      ExampleFileA: ["let count = 0", "fn bump()", "  return count + 1", "end"],
+    },
+    source: ['import bump from "ExampleFileA"', "d0.Setting = bump()"],
+    error: 'Line 0: In module "ExampleFileA": Line 2: count is not a constant of this ' +
+      "module; an imported function can use only its parameters, its own variables, " +
+      "the module's constants and its stack memory",
+  },
+  "an imported function reaches the module's stack memory on the same pin": {
+    modules: {
+      ExampleFileA: ["stack idle = 0", "fn busy()", "  return !idle", "end"],
+    },
+    source: ['import busy from "ExampleFileA" using d0', "d1.Setting = busy()"],
+    expected: ["get r0 d0 511", "seqz r0 r0", "s d1 Setting r0"],
+  },
+  "an imported function writes the module's stack memory": {
+    modules: {
+      ExampleFileA: [
+        "stack idle = 0",
+        "let log[2]",
+        "fn note(v)",
+        "  idle = 1",
+        "  log[0] = v",
+        "end",
+      ],
+    },
+    source: ['import note from "ExampleFileA" using d0', "note(d1.Setting)"],
+    // idle is ExampleFileA's first cell (511) and log the next two (509-510);
+    // the pin is this program's, the addresses are the module's.
+    expected: ["put d0 511 1", "l r0 d1 Setting", "put d0 509 r0"],
+  },
+  "an imported function that reaches stack memory needs a pin": {
+    modules: {
+      ExampleFileA: ["stack idle = 0", "fn busy()", "  return !idle", "end"],
+    },
+    source: ['import busy from "ExampleFileA"', "d1.Setting = busy()"],
+    error: 'Line 0: In module "ExampleFileA": Line 2: idle lives in this module\'s stack ' +
+      "memory; import this function `using d0` to say which device that is",
+  },
+  "an imported function cannot reach a device other than its own chip": {
+    modules: { ExampleFileA: ["fn other()", "  return d1.Setting", "end"] },
+    source: ['import other from "ExampleFileA" using d0', "d2.Setting = other()"],
+    error: 'Line 0: In module "ExampleFileA": Line 1: d1 is a pin of this chip, which ' +
+      "an imported function cannot reach; only db, the chip it is imported from",
+  },
+  "an imported function that reads db needs a pin": {
+    modules: { ExampleFileA: ["fn reading()", "  return db.Setting", "end"] },
+    source: ['import reading from "ExampleFileA"', "d1.Setting = reading()"],
+    error: 'Line 0: In module "ExampleFileA": Line 1: db is the chip this module runs ' +
+      "on; import this function `using d0` to say which device that is",
+  },
+  "a device the imported function's own callee reaches is an error too": {
+    modules: {
+      ExampleFileA: [
+        "fn outer(x)", "  return inner(x)", "end",
+        "fn inner(x)", "  return x + d1.Setting", "end",
+      ],
+    },
+    source: ['import outer from "ExampleFileA" using d0', "d2.Setting = outer(1)"],
+    error: 'Line 0: In module "ExampleFileA": Line 4: d1 is a pin of this chip, which ' +
+      "an imported function cannot reach; only db, the chip it is imported from",
+  },
+  "an imported function may be re-exported through another module": {
+    modules: {
+      ExampleFileB: ["fn double(x)", "  return x * 2", "end"],
+      ExampleFileA: 'import double from "ExampleFileB"',
+    },
+    source: [
+      'import double from "ExampleFileA"',
+      "d0.Setting = double(d1.Setting)",
+    ],
+    expected: ["l r0 d1 Setting", "mul r0 r0 2", "s d0 Setting r0"],
+  },
+  "an imported function that calls itself is rejected as recursive": {
+    modules: {
+      ExampleFileA: ["fn countdown(n)", "  return countdown(n - 1)", "end"],
+    },
+    source: ['import countdown from "ExampleFileA"', "d0.Setting = countdown(3)"],
+    // The line is the module's, not this program's: a diagnostic raised while
+    // lowering a copied body carries the offsets that body was parsed with.
+    error: "Line 0: Recursive functions are not supported: countdown",
   },
   "a module's list size must be a constant": {
     modules: { ExampleFileA: "let n = 2\nlet arr[n]" },
