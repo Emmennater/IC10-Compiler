@@ -1,0 +1,15 @@
+# Paths sync-main.ps1 keeps off the target branch (main).
+#
+# gitignore syntax, but this is not a .gitignore and git never reads it on its
+# own - the script passes it to `git ls-files --exclude-from`. These files are
+# tracked here on purpose, so they are backed up; they just must not be
+# published. Ordinary build artifacts belong in .gitignore instead, which both
+# branches share.
+#
+# The list has to name itself, or the sync would copy it across too.
+
+.claude/
+CLAUDE.md
+DEVELOPER.md
+sync-main.ps1
+.syncignore
