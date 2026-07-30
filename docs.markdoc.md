@@ -526,34 +526,24 @@ A `let` is a compile-time name that usually costs no instructions at all, so pre
 
 Chips can share values. `import` names something another program declared and lets you use it as if it were yours.
 
-Say one chip runs this program:
+A module is just another saved script, imported by the name it is saved under. Say one chip runs this one, `sensor-hub`:
 
-```icc
-# ExampleFileA
+```icc {% name="sensor-hub" compile=true %}
 stack idle = false
 const size = 2
 let arr[size] = [1, 2]
 ```
 
-Another chip, with that one wired to its `d0` pin, can reach all three:
+Its three declarations took the top three cells of that chip's stack, which is what the `poke`s above say. Another chip, with `sensor-hub`'s chip wired to its `d0` pin, can reach all three:
 
-```icc
-# ExampleFileB
-import idle from "ExampleFileA" using d0
-import arr from "ExampleFileA" using d0
-import size from "ExampleFileA"
+```icc {% compile=true %}
+import idle from "sensor-hub" using d0
+import arr from "sensor-hub" using d0
+import size from "sensor-hub"
 
 d1.Setting = idle
 d2.Setting = arr[0]
 d3.Setting = size
-```
-
-```ic10
-get r0 d0 511
-s d1 Setting r0
-get r0 d0 509
-s d2 Setting r0
-s d3 Setting 2
 ```
 
 The two forms differ in what they need, and which one applies follows from what the module declared:
@@ -563,19 +553,22 @@ The two forms differ in what they need, and which one applies follows from what 
 
 Imported stack memory is writable, and a write goes to the other chip:
 
-```icc
-# ExampleFileB
-import idle from "ExampleFileA" using d0
+```icc {% compile=true %}
+import idle from "sensor-hub" using d0
+import arr from "sensor-hub" using d0
 idle = 1
+arr[1] = d1.Setting
 ```
 
-```ic10
-put d0 511 1
-```
-
-{% callout type="warning" %}
+{% callout type="warn" %}
 Addresses are worked out by reading the module's declarations, in order, so the two programs must agree about them: **recompile the importing program whenever the module's `stack`, list, or `const` declarations change.** Inserting a `stack` line at the top of a module moves everything below it.
 {% /callout %}
+
+Writing `using` on the wrong kind of import is an error rather than something the compiler quietly ignores, since the two forms compile to entirely different things:
+
+```icc {% error=true %}
+import size from "sensor-hub" using d0
+```
 
 Some things deliberately cannot cross a module boundary:
 

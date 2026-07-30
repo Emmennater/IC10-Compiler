@@ -17,10 +17,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { docExamples, runDocExample, DOCS_FILE } from "../docs-examples.js";
+import { docExamples, docModules, runDocExample, DOCS_FILE } from "../docs-examples.js";
 
 const source = readFileSync(fileURLToPath(new URL(`../${DOCS_FILE}`, import.meta.url)), "utf8");
 const examples = docExamples(source);
+const modules = docModules(source);
 
 describe("documentation examples", () => {
   // Without this the suite passes gloriously on an extractor that matches
@@ -36,6 +37,27 @@ describe("documentation examples", () => {
   it("has no fence claiming both compile and error", () => {
     const both = examples.filter(e => e.compile && e.error).map(e => e.where);
     expect(both).toEqual([]);
+  });
+
+  // Modules are what multi-file examples are made of, and an example that
+  // imports one the extractor never found fails as a missing module rather
+  // than as anything a reader could act on. A floor, as above.
+  it("finds the named modules at all", () => {
+    expect(Object.keys(modules).length).toBeGreaterThan(0);
+  });
+
+  // Two fences sharing a name means the later one silently wins and the
+  // example importing it documents the wrong file.
+  it("gives every module a distinct name", () => {
+    const names = [];
+    for (const line of source.split("\n")) {
+      const match = /^```.*\bname="([^"]*)"/.exec(line);
+      if (match) names.push(match[1]);
+    }
+    expect(names.length).toBe(new Set(names).size);
+    // ...and that the hand-rolled scan above agrees with the real extractor,
+    // which is what the rest of this suite actually uses.
+    expect(new Set(names)).toEqual(new Set(Object.keys(modules)));
   });
 
   for (const example of examples) {

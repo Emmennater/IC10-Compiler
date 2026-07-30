@@ -25,7 +25,7 @@ export const DOCS_FILE = "docs.markdoc.md";
  * on what an example even is - the failure mode being an extractor that
  * quietly matches nothing and a suite that passes vacuously.
  */
-export const EXAMPLE_ATTRIBUTES = ["compile", "error", "removeLabels"];
+export const EXAMPLE_ATTRIBUTES = ["compile", "error", "removeLabels", "name"];
 
 /** `docs.markdoc.md:42` for a Markdoc node's `lines`, or "" if it has none. */
 export function locationOf(lines) {
@@ -41,13 +41,24 @@ export function locationOf(lines) {
  * non-CompileError is a fault in the compiler rather than in the example, so
  * it propagates untouched rather than being reported as a bad example.
  */
-export function runDocExample({ code, compile: wantCompile, error: wantError, removeLabels = false, where = "" }) {
+export function runDocExample({
+  code,
+  compile: wantCompile,
+  error: wantError,
+  removeLabels = false,
+  modules = {},
+  where = "",
+}) {
   const at = where ? ` (${where})` : "";
+  // An `import` in an example resolves to another *named* fence on the page,
+  // so a multi-file example is documented as the files themselves rather than
+  // as prose about files the reader cannot see.
+  const fileHandler = path => (Object.hasOwn(modules, path) ? modules[path] : undefined);
 
   let ic10 = null;
   let message = null;
   try {
-    ic10 = compile(getAST(code), { removeLabels });
+    ic10 = compile(getAST(code), { removeLabels }, fileHandler);
   } catch (e) {
     if (!(e instanceof CompileError)) throw e;
     message = e.message;
@@ -69,22 +80,48 @@ export function runDocExample({ code, compile: wantCompile, error: wantError, re
 }
 
 /**
+ * Every named fence in `source`, as the `{ path: source }` map an example's
+ * `import` resolves against. A fence earns a name to *be* a module; naming one
+ * says nothing about whether it compiles, so a module can be a plain listing,
+ * a compiled example, or both.
+ *
+ * The whole document is collected up front, so an example may import a module
+ * documented after it - fences are transformed in document order, but which
+ * file a program imports is not a statement about page layout.
+ */
+export function docModules(source) {
+  const modules = {};
+  for (const node of Markdoc.parse(source).walk()) {
+    if (node.type !== "fence") continue;
+    const { name, content } = node.attributes;
+    if (name) modules[name] = content;
+  }
+  return modules;
+}
+
+/**
  * Every fence in `source` that makes a claim, in document order, shaped as
  * `runDocExample` takes them. Fences with no `compile`/`error` annotation are
  * plain listings that assert nothing and are skipped.
+ *
+ * Every example carries the same module map, because any example may import
+ * any named fence and nothing here knows which ones it will reach for.
  */
 export function docExamples(source) {
+  const modules = docModules(source);
   const examples = [];
   for (const node of Markdoc.parse(source).walk()) {
     if (node.type !== "fence") continue;
-    const { compile: wantCompile, error: wantError, removeLabels, content, language } = node.attributes;
+    const { compile: wantCompile, error: wantError, removeLabels, name, content, language } = node.attributes;
     if (!wantCompile && !wantError) continue;
     examples.push({
       code: content,
       language,
+      name,
       compile: Boolean(wantCompile),
       error: Boolean(wantError),
       removeLabels: Boolean(removeLabels),
+      modules,
       where: locationOf(node.lines),
     });
   }

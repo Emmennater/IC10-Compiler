@@ -32,6 +32,19 @@ function writeScripts(scripts) {
   localStorage.setItem(SCRIPTS_KEY, JSON.stringify(scripts));
 }
 
+/**
+ * What the compiler reads an `import` from: the *saved* source of another
+ * script, by the name it is saved under, or undefined when there is no such
+ * script (which the compiler reports as a missing module).
+ *
+ * Saved rather than live on purpose - a module is another chip's program, and
+ * the addresses this compile bakes in have to be the ones that chip is
+ * actually running. Unsaved edits to a module are not in the chip yet.
+ */
+export function scriptSource(name) {
+  return readScripts()[name];
+}
+
 /** `base`, or the first `base2`, `base3`, … that no saved script uses. */
 function unusedName(base) {
   const scripts = readScripts();

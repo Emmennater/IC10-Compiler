@@ -4,7 +4,7 @@ import clipboardIconUrl from "./assets/clipboard-icon.svg";
 import { highlightSegments } from "./highlight.js";
 import { loadTheme, applyTheme, themeNames, themeName } from "./theme.js";
 import { setupDropdown, dropdownItem } from "./dropdown.js";
-import { runDocExample, locationOf } from "./docs-examples.js";
+import { runDocExample, docModules, locationOf } from "./docs-examples.js";
 
 loadTheme();
 
@@ -48,6 +48,30 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
   return new Markdoc.Tag(collapsible ? "details" : "div", { class: "code-block" }, [header, pre]);
 }
 
+// The header text of a block. A named fence is a module, so its name is what
+// the reader needs to see - the `import` in another block spells that name, and
+// nothing else on the page connects the two. Otherwise the language does.
+// Spellings the language tag alone doesn't capitalize the way prose does; an
+// unknown tag falls back to itself, so a new language needs no entry here.
+const LANGUAGE_LABELS = { icc: "ICC", ic10: "IC10" };
+
+function blockLabel(language, name) {
+  if (name) return name;
+  return LANGUAGE_LABELS[language] || language || "Code";
+}
+
+// Every code block is a `.code-group`, including the ones with nothing to
+// group: the border, the corners and the header are all styled at group level
+// (see docs.css), so a lone block outside one would keep its own `<pre>`
+// border and lose the header entirely.
+function codeGroup(children) {
+  return new Markdoc.Tag("div", { class: "code-group" }, children);
+}
+
+// Every named fence on the page, as what an example's `import` resolves
+// against. Collected once from the same source renderDocs parses.
+const modules = docModules(docsSource);
+
 // Overrides the built-in fence node: same attributes and `<pre>` wrapper,
 // but the code is split into highlighted `<span>`s (via the Lezer grammars
 // in highlight.js) instead of one escaped text node. `node.attributes.content`
@@ -69,6 +93,12 @@ function labeledCodeBlock(code, language, label, attributes, collapsible = false
 // can hold the same fences to the same claim without rendering a page; this
 // transform only decides what the result *looks* like.
 //
+// Orthogonal to all three, `name` makes a fence a module another fence can
+// `import` from, and titles the block with that name. It is what lets a
+// multi-file example be documented as its files rather than as prose about
+// files the reader can't see - and, because the importing fence is a `compile`
+// one, holds the whole set of them to the compiler.
+//
 // `removeLabels` resolves labels to absolute line numbers, as the editor's
 // export does. It defaults off here because `j loop0` teaches what `j 7`
 // doesn't; examples about the final chip-ready form turn it on.
@@ -78,33 +108,38 @@ const fence = {
     ...Markdoc.nodes.fence.attributes,
     compile: { type: Boolean, render: false, default: false },
     error: { type: Boolean, render: false, default: false },
-    removeLabels: { type: Boolean, render: false, default: false }
+    removeLabels: { type: Boolean, render: false, default: false },
+    name: { type: String, render: false }
   },
   transform(node, config) {
     const attributes = node.transformAttributes(config);
     const code = node.attributes.content;
     const language = node.attributes.language;
-    const { compile: wantCompile, error: wantError, removeLabels } = node.attributes;
+    const { compile: wantCompile, error: wantError, removeLabels, name } = node.attributes;
+    const label = blockLabel(language, name);
 
-    if (!wantCompile && !wantError) return codeBlock(code, language, attributes);
+    if (!wantCompile && !wantError) {
+      return codeGroup([labeledCodeBlock(code, language, label, attributes)]);
+    }
 
     const { ic10, message } = runDocExample({
       code,
       compile: wantCompile,
       error: wantError,
       removeLabels,
+      modules,
       where: locationOf(node.lines)
     });
 
     if (message !== undefined) {
-      return new Markdoc.Tag("div", { class: "code-group" }, [
-        labeledCodeBlock(code, language, "ICC", attributes),
+      return codeGroup([
+        labeledCodeBlock(code, language, label, attributes),
         labeledCodeBlock(message, "", "Error", { class: "code-error" })
       ]);
     }
 
-    return new Markdoc.Tag("div", { class: "code-group" }, [
-      labeledCodeBlock(code, language, "ICC", attributes),
+    return codeGroup([
+      labeledCodeBlock(code, language, label, attributes),
       // An example that compiles to nothing has no output block to expand;
       // saying so beats an empty <pre> the reader can't tell from a bug.
       ic10 === ""

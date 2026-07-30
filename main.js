@@ -1,7 +1,7 @@
 import { compile, CompileError } from "./compiler/index.ts";
 import { getAST } from "./compiler/ast.ts";
 import { editor, output, updateTextEditor, initListeners } from "./codemirror.js";
-import { setup } from "./save-load.js"
+import { setup, scriptSource } from "./save-load.js"
 
 const LINE_LIMIT = 128;
 const BYTE_LIMIT = 4096;
@@ -16,7 +16,9 @@ function run() {
     let ast = getAST(txt);
     // console.log(ast);
     let config = { removeLabels: true };
-    ic10 = compile(ast, config);
+    // `import` resolves against the saved scripts, so a module is just
+    // another script in the list, named by the name it was saved under.
+    ic10 = compile(ast, config, scriptSource);
   } catch (e) {
     if (e instanceof CompileError) {
       updateTextEditor(output, `# ${e.message}`);
