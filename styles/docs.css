@@ -292,4 +292,7 @@
 .tok-string { color: var(--theme-string); }
 .tok-comment { color: var(--theme-comment); }
 .tok-operator { color: var(--theme-operator); }
-.tok-special { color: var(--theme-special); }
+.tok-device { color: var(--theme-device); }
+.tok-register { color: var(--theme-register); }
+.tok-instruction { color: var(--theme-instruction); }
+.tok-label { color: var(--theme-label); }

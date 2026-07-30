@@ -51,8 +51,14 @@ end
 * {% tok kind="operator" %}Operator{% /tok %}
 * `+`, `-`, `==`, …
 ---
-* {% tok kind="special" %}Special{% /tok %}
-* A device (`d0`) or register (`r0`)
+* {% tok kind="device" %}Device{% /tok %}
+* A device (`d0`)
+---
+* {% tok kind="register" %}Register{% /tok %}
+* A register (`r0`)
+---
+* {% tok kind="instruction" %}Instruction{% /tok %}
+* An IC10 instruction
 {% /table %}
 
 ## A first program
