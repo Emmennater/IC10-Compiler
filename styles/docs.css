@@ -161,10 +161,12 @@
   white-space: nowrap;
 }
 
-/* The clipboard glyph (assets/clipboard-icon.svg) is applied as a mask
-   rather than inlined as SVG markup, so its fill tracks currentColor
-   instead of the stroke color baked into the source file - see the
-   --copy-icon-url custom property docs.js sets once at load. */
+/* The clipboard glyph is applied as a mask rather than inlined as SVG markup,
+   so its fill tracks currentColor instead of the stroke color baked into the
+   source file. The url is referenced from here, not set as a custom property
+   by docs.js: the buttons are prerendered markup now, so an icon that waited
+   for a module to load would be a blank button in the first paint. vite
+   rewrites and hashes the path like any other asset referenced from CSS. */
 .markdoc .copy-button {
   flex: 0 0 auto;
   width: 20px;
@@ -174,8 +176,8 @@
   border: none;
   background-color: var(--theme-text-element);
   cursor: pointer;
-  mask-image: var(--copy-icon-url);
-  -webkit-mask-image: var(--copy-icon-url);
+  mask-image: url("../assets/clipboard-icon.svg");
+  -webkit-mask-image: url("../assets/clipboard-icon.svg");
   mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
   mask-size: contain;

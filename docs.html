@@ -22,8 +22,14 @@
       </span>
     </h1>
     <hbox id="docs-body">
-      <nav id="docs-toc"></nav>
-      <div id="docs-content" class="markdoc"></div>
+      <!-- Both markers are filled in by the prerender plugin in
+           vite.config.js, in the dev server and in the built page alike -
+           docs.markdoc.md is rendered to markup once, by Node, rather than by
+           shipping Markdoc and the compiler to the browser. The plugin fails
+           loudly if either marker goes missing, since the alternative is
+           serving an empty page. -->
+      <nav id="docs-toc"><!--docs-toc--></nav>
+      <div id="docs-content" class="markdoc"><!--docs-content--></div>
     </hbox>
   </vbox>
 </body>

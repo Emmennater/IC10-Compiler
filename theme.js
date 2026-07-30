@@ -1,5 +1,10 @@
-
-const themes = {
+// The color values are exported because two very different consumers need
+// them: codemirror.js reads them as JS (a CodeMirror highlight style is built
+// from the strings, not from CSS), and the docs prerender in vite.config.js
+// generates this map into a `<style>` block so the static page is correctly
+// colored before - and without - any of this module running. Both are
+// generated from here; nothing hand-copies a color.
+export const themes = {
   "Default": {
     // Text
     "declaration": "#ff7b72",
@@ -38,8 +43,8 @@ const themes = {
   }
 };
 
-const THEME_KEY = "ic10-theme";
-const DEFAULT_THEME = "Dark+";
+export const THEME_KEY = "ic10-theme";
+export const DEFAULT_THEME = "Dark+";
 
 export const themeNames = Object.keys(themes);
 
@@ -57,6 +62,14 @@ export function applyTheme(name) {
   for (const [key, value] of Object.entries(themes[resolved])) {
     document.documentElement.style.setProperty(`--theme-${key}`, value);
   }
+
+  // Keeps the attribute the docs page's head script sets in step with the
+  // inline properties written above. The properties win on their own (an
+  // inline style beats a stylesheet rule), so this changes nothing about how
+  // the page looks now - it stops `data-theme` from naming one theme while
+  // the page displays another, which is the state a mid-session switch would
+  // otherwise leave behind.
+  document.documentElement.dataset.theme = resolved;
 
   localStorage.setItem(THEME_KEY, resolved);
 
