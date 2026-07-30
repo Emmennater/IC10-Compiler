@@ -152,7 +152,14 @@ function prerenderDocs() {
   };
 }
 
+// Relative rather than the default "/": the deployed site is a gh-pages project
+// page, so it is served from /IC10-Compiler/ and root-absolute asset URLs point
+// at the user page instead. `vite preview` serves dist/ *at* the root, which is
+// why that was the one place it worked. "./" is used rather than the repo name
+// so the build stays correct wherever it is served from - both pages sit at the
+// top of dist/, so relative urls resolve from either of them.
 export default defineConfig({
+  base: "./",
   plugins: [prerenderDocs()],
   build: {
     rollupOptions: {
