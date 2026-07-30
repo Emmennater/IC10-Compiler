@@ -406,11 +406,13 @@ modeling the program being compiled.
   invariant with deliberately different reset points.
 
 **Shared services** — `symbols.ts` (**`ScopeChain`, an immutable value**:
-`child()` / `functionFrame()` derive new chains; capturing "the caller's
-scopes" for an inlined parameter is just keeping the chain you already
-have), `functions.ts` (user-function metadata + syntactic read/write sets),
-`constexpr.ts` (`@constexpr` interpreter, typed signal classes, 200k-step
-budget).
+`child()` / `functionFrame()` / `forModule()` derive new chains; capturing
+"the caller's scopes" for an inlined parameter is just keeping the chain you
+already have), `functions.ts` (user-function metadata + syntactic read/write
+sets), `constexpr.ts` (`@constexpr` interpreter, typed signal classes,
+200k-step budget), `modules.ts` (`ModuleScanner`: reading another saved
+script, recomputing its addresses, and vetting a function copied out of it —
+it knows nothing of the pipeline and never lowers anything).
 
 **Pipeline** — `lowering.ts` (`Lowerer` owns the per-compile registries and
 registration/assembly; `FrameLowerer` does the actual lowering, one instance
@@ -489,22 +491,68 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
   chip is running, not unsaved edits to it. The docs page passes a handler over
   its own named fences instead (see the docs suite above), which is what makes
   a multi-file example checkable.
-- **An import is a symbol, not code.** `Lowerer.registerImports` runs before
-  any lowering and binds each `import` into the global scope: a module `const`
-  becomes an ordinary constant `var` (so it folds and emits nothing), and
-  stack memory becomes a `stackvar`/`list` Sym carrying the module's address
-  and the `using` pin. Everything downstream then treats an imported name
-  exactly like a local one, which is why the read, write and `for … of`
-  paths needed only the device threaded through them. Nothing is reserved
-  locally — the cells belong to the other chip.
-- **`moduleInterface` recomputes addresses; it never compiles the module.**
-  It walks the module's top-level statements and allocates through
-  `allocateCells`, the same helper the declarations themselves use, because
-  an importer computes addresses it will never see reserved. It folds only
-  `const`, since a `let` lives in the module's registers, and it rejects a
-  module that declares stack memory below the top level — such a body is
-  lowered once per call site, so its cells are not where an importer could
-  predict. A module's own imports are not re-exported.
+- **An import of a value is a symbol, not code.** `Lowerer.registerImports`
+  runs before any lowering and binds each `import` into the global scope: a
+  module `const` becomes an ordinary constant `var` (so it folds and emits
+  nothing), and stack memory becomes a `stackvar`/`list` Sym carrying the
+  module's address and the `using` pin. Everything downstream then treats an
+  imported name exactly like a local one, which is why the read, write and
+  `for … of` paths needed only the device threaded through them. Nothing is
+  reserved locally — the cells belong to the other chip.
+- **An import of a function *is* code.** There is nothing to call across a
+  device, so `registerModuleFunction` registers this program's own copy of the
+  body, and of every module function that body calls. What makes a copied body
+  mean the same thing here is two fields on its `FnInfo` — `moduleScope`, the
+  exporting module's constants standing where this program's globals would
+  (`ScopeChain.forModule`), and `selfDevice`, the pin its `db` resolves to —
+  plus `checkImportedFunction` in `modules.ts` having rejected, up front,
+  every name that would not survive the move. The body may mention only its
+  parameters, its own variables, the module's constants and the module's stack
+  memory; `db` and no other device; and calls to module functions or raw
+  opcodes. Anything else — a module `let`, a `define`, a device alias, a bare
+  placeholder — is an error.
+  - **Stack memory crosses on the same pin `db` does**, and on the same terms:
+    a cell is an address on the module's chip, so a body that reaches one is a
+    body that reaches the chip, and an import that omits `using` is rejected.
+    `registerModuleFunction` binds those names into `moduleScope` as the very
+    `stackvar`/`list` Syms an ordinary `import … using` would produce — the
+    module's address, the importer's pin — so the read, write and `for … of`
+    paths need nothing new. A re-exported cell keeps the address of the chip
+    that declared it, as everywhere else.
+  - The checks run at **import** time, against the module's own
+    `ErrorReporter`, because a diagnostic raised while lowering a copied body
+    would carry the module's source offsets into this program's line
+    numbering. That is exactly what still happens for anything else that goes
+    wrong in a copied body (see *Known gaps*), which is why the rules that
+    have a good error message are checked before lowering rather than during.
+  - The body is **copied** (`copyFunction`) because registration rewrites the
+    names of the module functions it calls. A callee takes its own name when
+    this program is not using it — `importedNames` reserves every name an
+    `import` line asks for first, so a callee never steals one — and a
+    numbered one when it is. The same module function reached through two
+    pins, or through two modules that re-export it, is two registrations with
+    two sets of callee names, which one shared body could not carry.
+  - Registration is keyed by module path, export name **and pin**, and the pin
+    travels with the whole pull: a function and everything it calls are
+    treated as living on the chip the `import` named.
+  - `@constexpr` is deliberately not carried across: the interpreter resolves
+    names through the program's own tables, which a copied body is not in.
+- **The module scan recomputes addresses; it never compiles the module.**
+  `ModuleScanner` in `modules.ts` walks the module's top-level statements and
+  allocates through `allocateCells`, the same helper the declarations
+  themselves use, because an importer computes addresses it will never see
+  reserved. It folds only `const`, since a `let` lives in the module's
+  registers, and it rejects a module that declares stack memory below the top
+  level — such a body is lowered once per call site, so its cells are not
+  where an importer could predict. One instance per compile: a module is read
+  once however many names come from it, and the `scanning` set turns a cycle
+  of re-exports into a diagnostic rather than a stack overflow.
+- **A module offers on what it imported.** A name travels through a chain of
+  modules, and a `const` that arrived that way is in the scan's `constants`,
+  so the module's own `const` and list-size expressions may use it. The
+  **pin does not travel**: an address, and a copied body's `db`, belong to the
+  chip that first declared them, so every importer states its own `using`.
+  A re-exporting module's `using` says only where *it* sees that chip.
 - Recursion is rejected, not supported (the frame's `active` set).
 - There is a real parser (`ast.ts` + `lezer/lang.grammar`), but the
   hand-built-AST differential suite still builds trees directly via
@@ -563,13 +611,30 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
   it baked in are only right while the module's `stack`, list and `const`
   declarations stay as they were, so inserting a `stack` line at the top of a
   module silently moves every address below it and both programs have to be
-  recompiled. Recording a module fingerprint would need somewhere to keep it,
-  which is the editor's problem rather than the compiler's.
+  recompiled. An imported *function* is worse in the same way: the copy is
+  taken at compile time, so editing the module leaves the copy behind.
+  Recording a module fingerprint would need somewhere to keep it, which is
+  the editor's problem rather than the compiler's.
 - An imported module is scanned for its interface but never checked. A module
-  that does not compile is only rejected for the parts
-  `moduleInterface` walks (a syntax error, a non-constant list size, stack
-  memory below the top level); anything else wrong with it surfaces when that
-  module is compiled on its own.
+  that does not compile is only rejected for the parts the scan walks (a
+  syntax error, a non-constant list size, stack memory below the top level,
+  and — for a function actually imported — `checkImportedFunction`); anything
+  else wrong with it surfaces when that module is compiled on its own. A
+  nested import naming something its module does not offer is not an error
+  either: the name is simply not offered on.
+- **A diagnostic raised while lowering an imported function's body carries the
+  module's line numbers**, since the node's offsets index the module's source
+  and the reporter is the importing program's. Everything with a good message
+  is therefore checked at import time instead (see *An import of a function is
+  code*); what is left is the ordinary compile errors — recursion, a nested
+  `fn`, an unassigned variable — where the wrong line is misleading but the
+  message still names the problem. Fixing it means threading a reporter
+  through `FrameContext`.
+- `checkImportedFunction` allows an undeclared identifier in a **raw opcode's**
+  argument position, because that is where logic types and other bare symbols
+  legitimately appear (`lb(hash, Setting, Average)`). A placeholder read there
+  is therefore not caught, and would name something in the importing program.
+  Every other position rejects it.
 - A read of a stack variable is not cached within a statement the way a
   placeholder read is, so `idle + idle` emits two `get`s. The placeholder
   cache is keyed by name with no invalidation on write, and a stack cell can

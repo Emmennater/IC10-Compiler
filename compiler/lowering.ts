@@ -23,17 +23,16 @@
  * frame was never modified - the JavaScript call stack is the only stack.
  */
 
-import { CompileError, ErrorReporter } from "./syntax.ts";
-import { getAST } from "./ast.ts";
+import { ErrorReporter } from "./syntax.ts";
 import {
-  childrenOf, getFormalAST,
+  childrenOf,
   type ArithmeticOpcode, type ArrayDeclaration as ListDeclaration, type ListIndexing,
   type Assignment, type BinaryOp, type Block, type ComparisonOp, type ComparisonOpcode,
   type CompoundAssignOp, type Constant, type Declaration, type DefineDef, type Device,
-  type DeviceDef, type Expression, type FormalSyntaxNode, type FunctionCall, type FunctionDef,
-  type Identifier, type If, type LogicalOp, type Loop, type Range, type Repeat, type Statement,
-  type StringExpr, type TernaryOp, type UnaryOp, type While, type For, type ForIn, type ForOf,
-  type StackDeclaration, type Import
+  type DeviceDef, type DevicePin, type Expression, type FormalSyntaxNode, type FunctionCall,
+  type FunctionDef, type Identifier, type If, type LogicalOp, type Loop, type Range,
+  type Repeat, type Statement, type StringExpr, type TernaryOp, type UnaryOp, type While,
+  type For, type ForIn, type ForOf, type StackDeclaration
 } from "./formal-ast.ts";
 import {
   assertNever,
@@ -55,6 +54,12 @@ import { ConstexprEvaluator } from "./constexpr.ts";
 import { LabelFactory } from "./labels.ts";
 import { StatementScope } from "./statement-scope.ts";
 import { foldExpression, pressure, type ConstantLookup } from "./folding.ts";
+import {
+  allocateCells, checkImportedFunction, copyFunction, inModule, listSize, ModuleScanner,
+  type FileHandler, type ModuleScan,
+} from "./modules.ts";
+
+export type { FileHandler } from "./modules.ts";
 
 /** Everything phase 2 (optimization) needs from lowering. */
 export type LoweredProgram = {
@@ -95,129 +100,6 @@ export const INLINE_THRESHOLD = 3;
 /** Mapping names to array declarations. */
 type ArrayTable = Map<string, { start: number; size: number; }>;
 
-/** How the compiler reads another module's source; missing files return nothing. */
-export type FileHandler = (path: string) => string | null | undefined;
-
-/** What a module offers the programs that import from it. */
-type ModuleExport =
-  // A `const`: a compile-time value, so the import is one too and costs nothing
-  | { kind: "const"; value: ConstOperand }
-  // A `stack` declaration: one cell of the module's chip's stack memory
-  | { kind: "stackvar"; addr: number }
-  // A list: `size` cells of it, starting at `start`
-  | { kind: "list"; start: number; size: number };
-
-/**
- * Take `size` cells from the top of the free stack space below `top`, and
- * report the new top. The cells run *upwards* from the address returned, so a
- * list's first element sits lowest and the space below stays free for the next
- * declaration and, after those, for spilled values.
- *
- * Both the frame that declares stack memory and the scan that works out where
- * an imported module put its own call this, because the two must agree cell
- * for cell: an importer computes addresses it never sees reserved.
- */
-function allocateCells(top: number, size: number): { start: number; top: number } {
-  return { start: top - size + 1, top: top - size };
-}
-
-/**
- * The element count of a list declaration. A `define` is deliberately not
- * usable here (`fold` resolves names through `lookupVar`, which skips defines):
- * the player can retune a define in the chip, and a list whose size had been
- * baked into addresses would not survive that.
- */
-function listSize(statement: ListDeclaration, constantOf: ConstantLookup, errors: ErrorReporter): number {
-  const sizeOp = foldExpression(statement.size, constantOf);
-  if (!sizeOp) throw errors.error("List size must be constant", statement.size);
-  const size = parseFloat(sizeOp.text);
-  if (!Number.isInteger(size)) throw errors.error("List size must be an integer", statement.size);
-  return size;
-}
-
-/**
- * What a module's top-level declarations offer an importer: the value of every
- * `const`, and the stack address of every `stack` and list declaration.
- *
- * The addresses are recomputed here rather than read out of a compile of the
- * module, so this walk allocates cells exactly as the declarations themselves
- * do - same order, same arithmetic, via `allocateCells`. That is only
- * predictable while every declaration is top level: a list inside a function
- * body is allocated once per lowering of that body, which depends on where the
- * module calls it, so a module with one is rejected instead of guessed at.
- *
- * Only `const` becomes a value export. A `let` lives in the module's own
- * registers, and its top-level value is not what a reader on another chip
- * would see anyway.
- */
-function moduleInterface(module: Block, errors: ErrorReporter): Map<string, ModuleExport> {
-  const exports = new Map<string, ModuleExport>();
-  const constants = new Map<string, ConstOperand>();
-  const constantOf: ConstantLookup = name => constants.get(name) ?? null;
-
-  const nestedDeclaration = (node: FormalSyntaxNode): FormalSyntaxNode | null => {
-    if (node.type === "stackdeclaration" || node.type === "arraydeclaration") return node;
-    for (const child of childrenOf(node)) {
-      const found = nestedDeclaration(child);
-      if (found) return found;
-    }
-    return null;
-  };
-
-  let top = STACK_TOP;
-  for (const statement of module.statements) {
-    // Only the statement's *children* are searched: the statement itself being
-    // a declaration is the case this whole function is about.
-    for (const child of childrenOf(statement)) {
-      const nested = nestedDeclaration(child);
-      if (nested) {
-        throw errors.error(
-          "stack memory declared outside the top level cannot be imported", nested);
-      }
-    }
-
-    switch (statement.type) {
-      case "declaration": {
-        if (!statement.constant || !statement.value) break;
-        const value = foldExpression(statement.value, constantOf);
-        if (!value) break; // a const of a runtime value: nothing to export
-        constants.set(statement.target.name, value);
-        exports.set(statement.target.name, { kind: "const", value });
-        break;
-      }
-      case "stackdeclaration": {
-        const cell = allocateCells(top, 1);
-        top = cell.top;
-        exports.set(statement.name.name, { kind: "stackvar", addr: cell.start });
-        break;
-      }
-      case "arraydeclaration": {
-        const size = listSize(statement, constantOf, errors);
-        const cells = allocateCells(top, size);
-        top = cells.top;
-        exports.set(statement.name.name, { kind: "list", start: cells.start, size });
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  return exports;
-}
-
-/**
- * The module an `import ... from "x"` names. A StringExpr carries the raw
- * spelling, quotes included - that is what `HASH("...")` wants of every other
- * string - so the quotes come off here. Escapes are left alone: the grammar
- * does not decode them and a module path has no use for one.
- */
-function modulePath(node: StringExpr): string {
-  const text = node.value;
-  return text.length >= 2 && text.startsWith('"') && text.endsWith('"')
-    ? text.slice(1, -1)
-    : text;
-}
-
 /**
  * Services shared by every frame of one compilation: id sequences, label
  * naming, the function table, and the output region records. These are the
@@ -256,6 +138,12 @@ type FrameContext = {
   readonly loop: LoopTargets | null;
   /** Functions whose lowering encloses this frame (recursion detection). */
   readonly active: ReadonlySet<string>;
+  /**
+   * The pin `db` names here. `db` is "the chip this code runs on", which for
+   * the body of an imported function is the chip it was imported from - the
+   * one its `using` clause named. Everywhere else it is `db` itself.
+   */
+  readonly selfDevice: DevicePin;
 };
 
 /** `set` plus one element, as a new set - frames never mutate their context. */
@@ -266,6 +154,15 @@ function including(set: ReadonlySet<string>, name: string): ReadonlySet<string> 
 export class Lowerer {
   private readonly services: Services;
   private readonly ast: Block;
+  /**
+   * Every imported function this program registered, by module, export name
+   * and pin - the three things that decide whether two imports mean the same
+   * body. Keyed rather than looked up in `fnTable` because that is keyed by
+   * the name each one ended up with, which is this program's choice.
+   */
+  private readonly moduleFns = new Map<string, FnInfo>();
+  /** Names the program's own `import` lines claim, so a callee avoids them. */
+  private readonly importedNames = new Set<string>();
 
   constructor(
     ast: Block,
@@ -298,6 +195,9 @@ export class Lowerer {
     this.registerFunctions();
     const globals = ScopeChain.root();
     this.registerImports(fileHandler, globals);
+    // Counted after imports: an imported function is a call site's target like
+    // any other, and its own body may call further imported functions.
+    this.countCalls();
     this.collectFnGlobalNames();
 
     const mainBuffer: Inst[] = [];
@@ -308,6 +208,7 @@ export class Lowerer {
       returnTarget: null,
       loop: null,
       active: new Set(),
+      selfDevice: SELF_DEVICE,
     });
     for (const statement of this.ast.statements) {
       root.processStatement(statement);
@@ -351,13 +252,24 @@ export class Lowerer {
           alwaysInline: null,
           varRefs: null,
           varWrites: null,
+          moduleScope: null,
+          selfDevice: null,
         });
         registeredFnNodes.add(statement);
       }
       pendingConstexpr = false;
     }
+  }
 
-    // Count call sites for the inline-single-use decision
+  /**
+   * Count call sites for the inline-single-use decision. The program's own
+   * tree covers every local function, since their definitions are in it;
+   * an imported body is not, so each registered one is walked as well. Two
+   * names for one imported function (an explicit import of something already
+   * pulled in as a callee) share its FnInfo, so it is still counted once.
+   */
+  private countCalls(): void {
+    const { fnTable } = this.services;
     const countIn = (node: FormalSyntaxNode): void => {
       if (node.type === "functioncall") {
         const fn = fnTable.get(node.name.name);
@@ -366,12 +278,19 @@ export class Lowerer {
       for (const child of childrenOf(node)) countIn(child);
     };
     countIn(this.ast);
+    for (const fn of this.moduleFns.values()) {
+      for (const statement of fn.body) countIn(statement);
+    }
   }
 
   private collectFnGlobalNames(): void {
     const { fnTable, fnGlobalNames } = this.services;
     for (const fn of fnTable.values()) {
       if (fn.callCount < 2) continue; // single-site functions inline
+      // An imported body resolves its names in its own module's scope and
+      // cannot reach this program's globals, so its references say nothing
+      // about which of them need a home register.
+      if (fn.moduleScope) continue;
       for (const name of fnVarRefs(fn, fnTable).refs) fnGlobalNames.add(name);
     }
   }
@@ -381,16 +300,19 @@ export class Lowerer {
    * lowered, so an imported name resolves exactly like a locally declared one
    * from that point on.
    *
-   * An import comes in two shapes, and which one is right follows from what
+   * An import comes in three shapes, and which one is right follows from what
    * the module declared rather than from how the import is written:
    *
    * - Stack memory - a `stack` variable or a list - lives on the chip running
    *   that module, so reaching it takes a device: `using d0` names the pin this
-   *   chip sees it on. The address is the module's, computed by
-   *   `moduleInterface`; nothing is reserved here, because the cells belong to
-   *   the other chip.
+   *   chip sees it on. The address is the module's, computed by the module
+   *   scan; nothing is reserved here, because the cells belong to the other
+   *   chip.
    * - A `const` is a compile-time value, so importing one substitutes the value
    *   and reads no device at all.
+   * - A `fn` is neither: it is source, and this program registers its own copy
+   *   of the body (see `registerModuleFunction`). `using` still matters, since
+   *   `db` inside that body means the chip it came from.
    *
    *     # ExampleFileA
    *     stack idle = false
@@ -412,12 +334,21 @@ export class Lowerer {
    *     s d3 Setting 2   # size needed no device and emits no read
    *
    * A module is read once however many names come from it, and is only scanned
-   * for its interface - its own code is never lowered here, and its own imports
-   * are not re-exported.
+   * for its interface - its own code is never lowered here. What it imported
+   * itself it offers on: an export travels through a chain of modules, and the
+   * pin does not, since the address (or the body) still belongs to whichever
+   * chip first declared it.
    */
   private registerImports(fileHandler: FileHandler, globals: ScopeChain): void {
     const { errors, fnTable } = this.services;
-    const scanned = new Map<string, Map<string, ModuleExport>>();
+    const scanner = new ModuleScanner(fileHandler);
+
+    // Every name an `import` line asks for, claimed before anything is
+    // registered: a function pulled in as somebody else's callee picks its
+    // own name here, and it must not take one this program spelled out.
+    for (const statement of this.ast.statements) {
+      if (statement.type === "import") this.importedNames.add(statement.name.name);
+    }
 
     for (const statement of this.ast.statements) {
       if (statement.type !== "import") continue;
@@ -426,18 +357,13 @@ export class Lowerer {
         throw errors.error(`${name} was already defined`, statement.name);
       }
 
-      const path = modulePath(statement.path);
-      let exports = scanned.get(path);
-      if (!exports) {
-        exports = this.scanModule(path, statement, fileHandler);
-        scanned.set(path, exports);
-      }
-
-      const exported = exports.get(name);
+      const scan = scanner.scan(statement, errors);
+      const path = scan.path;
+      const exported = scan.exports.get(name);
       if (!exported) {
         throw errors.error(`${name} is not declared in ${JSON.stringify(path)}`, statement.name);
       }
-      const pin = statement.device?.name;
+      const pin = statement.device?.name ?? null;
 
       if (exported.kind === "const") {
         if (statement.device) {
@@ -454,6 +380,15 @@ export class Lowerer {
         continue;
       }
 
+      if (exported.kind === "fn") {
+        const fn = this.registerModuleFunction(
+          exported.owner, name, exported.def, pin, name, statement);
+        // Already pulled in as another function's callee, under a name this
+        // program did not choose: bind the asked-for name to the same body.
+        if (fn.name !== name) fnTable.set(name, fn);
+        continue;
+      }
+
       if (!pin) {
         throw errors.error(
           `${name} lives in ${JSON.stringify(path)}'s stack memory; ` +
@@ -466,27 +401,113 @@ export class Lowerer {
   }
 
   /**
-   * Read a module and work out what it offers. Its own diagnostics are raised
-   * against its own text - so their line numbers point into it - and then
-   * wrapped in one against the `import` that pulled it in, which is the line an
-   * editor can actually take the reader to.
+   * Register this program's own copy of a module function, and of every module
+   * function it calls.
+   *
+   * An imported function is source, not an address, so there is nothing to
+   * call across a device: the body is compiled here. What makes that mean the
+   * same thing it did in the module is the pair of fields the FnInfo carries -
+   * the module's constants as its scope, and the import's pin as its `db` -
+   * plus `checkImportedFunction` having rejected every name that would not
+   * survive the move. Only then is the body's meaning independent of which
+   * program it was copied into.
+   *
+   * A callee is registered under its own name when this program is not using
+   * it for something else, and a numbered one when it is; the call sites in
+   * the copied body are rewritten to whichever it got. That is why the body is
+   * copied: the same module function reached through two pins - or through two
+   * modules that re-export it - is two functions here, each with its own set of
+   * callee names, and one shared body could only carry one set.
+   *
+   * The pin travels with the whole pull: a function and everything it calls are
+   * treated as living on the chip the `import` named. Registration is keyed by
+   * it as well as by the module and name, so the same body imported through two
+   * pins is two registrations rather than one with the wrong device.
    */
-  private scanModule(
-    path: string,
-    statement: Import,
-    fileHandler: FileHandler,
-  ): Map<string, ModuleExport> {
-    const source = fileHandler(path);
-    if (typeof source !== "string") {
-      throw this.services.errors.error(`Cannot find module ${JSON.stringify(path)}`, statement.path);
+  private registerModuleFunction(
+    owner: ModuleScan,
+    exportName: string,
+    def: FunctionDef,
+    pin: DevicePin | null,
+    /** The name to register under, when an `import` line asked for one. */
+    asName: string | null,
+    at: Range,
+  ): FnInfo {
+    const { errors, fnTable } = this.services;
+    const key = `${owner.path} ${exportName} ${pin ?? ""}`;
+    const existing = this.moduleFns.get(key);
+    if (existing) return existing;
+
+    const body = copyFunction(def);
+    const name = asName ?? this.uniqueFnName(exportName);
+
+    // The scope the copied body resolves free names in: everything of the
+    // module's it is allowed to reach, and nothing of this program's. Stack
+    // memory is bound exactly as an ordinary `import ... using` binds it -
+    // the module's address, on the pin this import named - which is the same
+    // rewrite `db` gets, since these cells are on that chip too. Only when
+    // there is a pin: without one `checkImportedFunction` has already ruled
+    // out a body that names any of them.
+    const scope: Scope = new Map();
+    for (const [constName, value] of owner.constants) {
+      scope.set(constName, {
+        kind: "var",
+        state: { value, maybe: false, home: null },
+        constant: true,
+      });
     }
-    const moduleErrors = new ErrorReporter(source);
-    try {
-      return moduleInterface(getFormalAST(getAST(source)), moduleErrors);
-    } catch (e) {
-      if (!(e instanceof CompileError)) throw e;
-      throw this.services.errors.error(`In module ${JSON.stringify(path)}: ${e.message}`, statement);
+    if (pin) {
+      for (const [cellName, exported] of owner.exports) {
+        if (exported.kind === "stackvar") {
+          scope.set(cellName, { kind: "stackvar", addr: exported.addr, device: pin });
+        } else if (exported.kind === "list") {
+          scope.set(cellName, {
+            kind: "list", start: exported.start, size: exported.size, device: pin,
+          });
+        }
+      }
     }
+
+    const fn: FnInfo = {
+      name,
+      params: body.args.map(arg => arg.name),
+      body: body.body.statements,
+      // `@constexpr` is not carried across: the interpreter resolves names
+      // through the program's own tables, which an imported body is not in.
+      constexpr: false,
+      node: body,
+      callCount: 0,
+      paramVregs: null,
+      retVreg: null,
+      lowered: null,
+      alwaysInline: null,
+      varRefs: null,
+      varWrites: null,
+      moduleScope: scope,
+      selfDevice: pin,
+    };
+    // Registered before the body is walked, so a module function that calls
+    // itself resolves to this entry rather than registering a second copy;
+    // the call itself is then rejected by `checkNotRecursive`.
+    this.moduleFns.set(key, fn);
+    fnTable.set(name, fn);
+
+    const callees = inModule(owner, at, errors, () => checkImportedFunction(body, owner, pin));
+    for (const [calleeName, callee] of callees) {
+      const registered =
+        this.registerModuleFunction(callee.owner, calleeName, callee.def, pin, null, at);
+      for (const call of callee.calls) call.name.name = registered.name;
+    }
+    return fn;
+  }
+
+  /** A free name for a function this program never spelled out itself. */
+  private uniqueFnName(base: string): string {
+    let name = base;
+    for (let i = 2; this.services.fnTable.has(name) || this.importedNames.has(name); i++) {
+      name = `${base}${i}`;
+    }
+    return name;
   }
 
   /**
@@ -630,8 +651,18 @@ class FrameLowerer {
 
   // ------------------------ property accesses ---------------------------
 
+  /**
+   * The pin a device token names in this frame. Everywhere but the body of an
+   * imported function that is the token itself; there, `db` - "the chip this
+   * code runs on" - is the chip the body came from, and the pin the import
+   * named is how this program reaches it.
+   */
+  private deviceText(node: Device): string {
+    return node.name === SELF_DEVICE ? this.cx.selfDevice : node.name;
+  }
+
   private resolveBase(base: Device | Identifier): ResolvedBase {
-    if (base.type === "device") return { kind: "device", text: base.name };
+    if (base.type === "device") return { kind: "device", text: this.deviceText(base) };
     const symbol = this.chain.lookup(base.name);
     if (symbol?.kind === "device") return { kind: "device", text: base.name };
     if (symbol?.kind === "define") return { kind: "define", text: symbol.text };
@@ -647,7 +678,7 @@ class FrameLowerer {
    * strings name IC10 symbols directly; everything else compiles normally.
    */
   private compileCallArg(node: Expression): Operand {
-    if (node.type === "device") return symOp(node.name);
+    if (node.type === "device") return symOp(this.deviceText(node));
     if (node.type === "string") return symOp(node.value.slice(1, -1));
     if (node.type === "identifier") {
       const symbol = this.chain.lookup(node.name);
@@ -760,11 +791,15 @@ class FrameLowerer {
     if (!fn.lowered) this.lowerFunction(fn, node);
     args.forEach((a, i) => this.emit({ op: "movev", dest: fn.paramVregs![i], src: a, node }));
     this.emit({ op: "jal", target: fn.name, node });
-    // Globals the function assigns are no longer compile-time constants
-    for (const globalName of fnVarRefs(fn, this.fnTable).writes) {
-      const symbol = this.chain.globalGet(globalName);
-      if (symbol?.kind !== "var" || symbol.state.home === null) continue;
-      symbol.state.value = { kind: "vreg", id: symbol.state.home };
+    // Globals the function assigns are no longer compile-time constants. An
+    // imported body assigns only names of its own module, so it invalidates
+    // nothing here however its spellings happen to line up with ours.
+    if (!fn.moduleScope) {
+      for (const globalName of fnVarRefs(fn, this.fnTable).writes) {
+        const symbol = this.chain.globalGet(globalName);
+        if (symbol?.kind !== "var" || symbol.state.home === null) continue;
+        symbol.state.value = { kind: "vreg", id: symbol.state.home };
+      }
     }
     if (!wantValue) return null;
     // Copy the result out so a later call cannot clobber it; the copy
@@ -1667,6 +1702,18 @@ class FrameLowerer {
 
   // ---------------------------- functions -------------------------------
 
+  /**
+   * The chain a function body resolves names in. A local body sees this
+   * program's globals under its parameters, as always. An imported body sees
+   * its own module's constants instead and nothing else: it was written
+   * against those names, and a global of this program that happened to share
+   * a spelling would otherwise quietly answer for one of them.
+   */
+  private bodyChain(fn: FnInfo, paramScope: Scope): ScopeChain {
+    const outer = fn.moduleScope ? ScopeChain.forModule(fn.moduleScope) : this.chain;
+    return outer.functionFrame(paramScope);
+  }
+
   /** Reject a call that would re-enter a function already being lowered. */
   private checkNotRecursive(fn: FnInfo, node: Range): void {
     if (this.cx.active.has(fn.name)) {
@@ -1753,8 +1800,9 @@ class FrameLowerer {
     // its own function frame. The caller's loop stays visible: textual
     // inlining places the body physically inside it, macro-style.
     const inlined = this.withContext({
-      chain: this.chain.functionFrame(paramScope),
+      chain: this.bodyChain(fn, paramScope),
       active: including(this.cx.active, fn.name),
+      selfDevice: fn.selfDevice ?? SELF_DEVICE,
     });
 
     const last = fn.body[fn.body.length - 1];
@@ -1797,11 +1845,12 @@ class FrameLowerer {
     // whichever call site happened to trigger lowering (fix 7).
     const body = this.withContext({
       buffer,
-      chain: this.chain.functionFrame(paramScope),
+      chain: this.bodyChain(fn, paramScope),
       statements: this.statements.forNestedBody(),
       returnTarget: { home: fn.retVreg, endLabel: this.labels.functionEnd(fn.name) },
       loop: null,
       active: including(this.cx.active, fn.name),
+      selfDevice: fn.selfDevice ?? SELF_DEVICE,
     });
     body.emitFunctionBody(fn);
     fn.lowered = buffer;
@@ -1972,7 +2021,7 @@ class FrameLowerer {
   private processDeviceDeclaration(statement: DeviceDef): void {
     this.checkUndeclared(statement.name);
     const name = statement.name.name;
-    const pin = statement.device.name;
+    const pin = this.deviceText(statement.device);
     this.chain.declare(name, { kind: "device", pin });
     this.emit({ op: "alias", name, device: pin, node: statement });
   }

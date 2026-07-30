@@ -3,8 +3,12 @@
  * (referenced/assigned name sets) that call sites and variable demotion use.
  */
 
-import { childrenOf, type FormalSyntaxNode, type FunctionDef, type Statement } from "./formal-ast.ts";
+import {
+  childrenOf,
+  type DevicePin, type FormalSyntaxNode, type FunctionDef, type Statement,
+} from "./formal-ast.ts";
 import type { Inst } from "./ir.ts";
+import type { Scope } from "./symbols.ts";
 
 /** A user-defined function, registered before anything is lowered. */
 export type FnInfo = {
@@ -25,6 +29,14 @@ export type FnInfo = {
   // Names referenced/assigned by the body and its callees (syntactic), cached
   varRefs: Set<string> | null;
   varWrites: Set<string> | null;
+  // An imported function: the two things that make its body mean the same
+  // here as it did in the module it was copied from. `moduleScope` is what it
+  // resolves free names in - that module's constants, and nothing of this
+  // program's - and `selfDevice` is the pin its `db` refers to, the one the
+  // `import ... using` clause named. Both null for a locally defined function,
+  // whose body means what it says.
+  moduleScope: Scope | null;
+  selfDevice: DevicePin | null;
 };
 
 export type FnTable = Map<string, FnInfo>;

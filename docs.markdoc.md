@@ -607,11 +607,100 @@ Writing `using` on the wrong kind of import is an error rather than something th
 import size from "sensor-hub" using d0
 ```
 
+### Importing a function
+
+A `fn` is the third thing a module can offer, and it travels differently from the other two: there is nothing to call across a device, so the body is compiled into *your* program. Any module function it calls comes with it.
+
+```icc {% name="pressure-math" compile=true %}
+const limit = 60
+
+fn safe(p)
+  return min(p, limit)
+end
+
+fn margin(p)
+  return limit - safe(p)
+end
+```
+
+```icc {% compile=true %}
+import margin from "pressure-math"
+
+d0.Setting = margin(d1.Pressure)
+```
+
+`safe` arrived without being named, and so did `limit`. You never have to know what the copy of `safe` is called here — if your program is already using that name for something of its own, the copy quietly takes another.
+
+A body compiled somewhere else has to mean the same thing there, so what it may mention is narrow: **its parameters, its own variables, the module's constants, and the module's stack memory.** A module `let` lives in that chip's registers and does not survive the copy, and a bare name would be a placeholder in whichever program it landed in.
+
+Devices are narrow for the same reason. `db` is "the chip this code runs on", which for a copied body is the chip it came from — so `using` is what says which pin that is:
+
+```icc {% name="vent" compile=true %}
+stack cycles = 0
+
+fn open()
+  db.On = 1
+  db.Mode = 0
+  cycles = cycles + 1
+end
+```
+
+```icc {% compile=true %}
+import open from "vent" using d0
+
+open()
+```
+
+`cycles` came over the same pin, and for the same reason: it is a cell on the module's chip, so a function that touches one is a function that touches the chip. The address is the module's and the pin is yours — exactly what `import cycles from "vent" using d0` would have given you.
+
+Leaving the `using` off is an error, since nothing would say where `db` — or the cell — is. So is naming any other pin inside the module, because `d1` on that chip and `d1` on yours are wired to different things:
+
+```icc {% name="misdirected" compile=true %}
+fn read()
+  return d1.Setting
+end
+```
+
+```icc {% error=true %}
+import read from "misdirected" using d0
+d2.Setting = read()
+```
+
+### Passing imports on
+
+What a module imported, it offers on. A name can travel through a chain of them, and a `const` that arrived that way is a constant like any other — usable in the module's own declarations:
+
+```icc {% name="site-config" compile=true %}
+const size = 4
+stack alarm = 0
+```
+
+```icc {% name="site-hub" compile=true %}
+import size from "site-config"
+import alarm from "site-config" using d5
+
+let log[size]
+```
+
+```icc {% compile=true %}
+import size from "site-hub"
+import log from "site-hub" using d0
+
+d1.Setting = size
+d2.Setting = log[0]
+```
+
+What does *not* travel is the pin. An address, and a function body's `db`, belong to the chip that first declared them — `site-hub` seeing `alarm` on its `d5` says nothing about where you see it. Every importer names that chip itself:
+
+{% callout type="warn" %}
+`import alarm from "site-hub" using d0` reads `site-config`'s cell, so `d0` has to be wired to **`site-config`'s** chip, not to `site-hub`'s.
+{% /callout %}
+
 Some things deliberately cannot cross a module boundary:
 
 - **A `let`** is not importable. It lives in the module's registers, not at an address.
 - **Stack memory declared outside the top level** makes the whole module unimportable. A list inside a function body is allocated once per lowering of that body, which depends on where the module calls it, so the address is not something an importer can predict — it is rejected rather than guessed at.
-- **A module's own imports are not re-exported.** Only what a module declares itself can be imported from it.
+- **A cycle of imports** is rejected rather than followed.
 
 ## Functions
 
@@ -800,8 +889,8 @@ These are reserved and cannot be used as names.
 | `const X = e` | compile-time constant |
 | `let a[n]` / `let a[n] = [e, …]` | list |
 | `stack x` / `stack x = e` | one cell of stack memory |
-| `import x from "p"` | another module's `const` |
-| `import x from "p" using d0` | another module's stack memory |
+| `import x from "p"` | another module's `const`, or its `fn` |
+| `import x from "p" using d0` | another module's stack memory, or a `fn` that reads `db` |
 | `define X = e` | in-chip define |
 | `device p = d0` | device alias |
 | `x = e` / `x op= e` | assignment |
