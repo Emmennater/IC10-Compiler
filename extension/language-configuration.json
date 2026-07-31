@@ -1,0 +1,11 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*((\\b(if|while|for|else|elif|fn|repeat)\\b.*)|.*\\(\\s*|.*\\[\\s*)$",
+    "decreaseIndentPattern": "^\\s*(\\)|\\s*\\]|\\b(else|catch|finally)\\b)",
+    "indentNextLinePattern": "^\\s*(if|while|for|else|elif)\\b.*$",
+    "unIndentedLinePattern": "^\\s*$"
+  }
+}
