@@ -42,6 +42,9 @@ end
 * {% tok kind="number" %}Number{% /tok %}
 * A numeric literal
 ---
+* {% tok kind="bool" %}Boolean{% /tok %}
+* A numeric literal
+---
 * {% tok kind="string" %}String{% /tok %}
 * A string literal
 ---

@@ -8,10 +8,17 @@
   "engines": {
     "vscode": "^1.75.0"
   },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "vscode-languageclient": "^8.1.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.81.0"
+    "@types/vscode": "^1.81.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.9.3"
   }
 }

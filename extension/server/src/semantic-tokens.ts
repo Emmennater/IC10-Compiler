@@ -40,6 +40,7 @@ const CLASS_MAP: Record<string, { type: string; modifiers?: string[] }> = {
   "tok-comment": { type: "comment" },
   "tok-string": { type: "string" },
   "tok-number": { type: "number" },
+  "tok-bool": { type: "bool" },
   "tok-variable": { type: "variable" },
   "tok-function": { type: "function" },
   "tok-operator": { type: "operator" },

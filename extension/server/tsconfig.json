@@ -10,7 +10,6 @@
     // The extension lives inside the compiler repo, so `ic10-compiler/...`
     // specifiers resolve to the sibling source rather than an npm package.
     // esbuild reads these same paths when bundling (see esbuild.mjs).
-    "baseUrl": ".",
     "paths": {
       "ic10-compiler/*": ["../../*"]
     },
