@@ -1,0 +1,102 @@
+{
+  "name": "stationeers-icc-language-support",
+  "description": "VS Code extension for the ICC language",
+  "author": "emmettdj",
+  "license": "MIT",
+  "version": "1.0.0",
+  "publisher": "emmettdj",
+  "categories": [],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "activationEvents": [
+    "onLanguage:icc"
+  ],
+  "main": "./client/out/extension",
+  "contributes": {
+    "languages": [
+      {
+        "id": "icc",
+        "aliases": [
+          "ICC",
+          "icc"
+        ],
+        "extensions": [
+          ".icc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "icc",
+        "scopeName": "source.icc",
+        "path": "./syntaxes/icc.tmLanguage.json"
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "declarationKeyword",
+        "superType": "keyword",
+        "description": "A storage declaration keyword: let, const, define, device, stack."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "icc",
+        "scopes": {
+          "declarationKeyword": [
+            "storage.type",
+            "storage.modifier",
+            "keyword.declaration"
+          ]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "icc.compile",
+        "title": "Compile to IC10",
+        "category": "ICC",
+        "icon": "$(play)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "icc.compile",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == icc"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "icc.compile",
+          "when": "resourceLangId == icc",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "icc.compile",
+          "when": "editorLangId == icc"
+        }
+      ]
+    },
+    "configuration": {}
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -b client && npm --prefix server run build",
+    "watch": "npm --prefix server run watch",
+    "typecheck": "tsc -b client && npm --prefix server run typecheck",
+    "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.5.7",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.2.2"
+  }
+}

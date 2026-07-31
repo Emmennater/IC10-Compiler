@@ -1,0 +1,17 @@
+// Launches the ICC VS Code extension (in extension/) from the repo root, so the
+// compiler and the extension can be edited in one window. Opening the
+// extension/ folder directly also works via extension/.vscode/launch.json.
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "extensionHost",
+      "request": "launch",
+      "name": "Launch ICC Extension",
+      "runtimeExecutable": "${execPath}",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/extension"],
+      "outFiles": ["${workspaceFolder}/extension/client/out/**/*.js"],
+      "preLaunchTask": "build-extension"
+    }
+  ]
+}

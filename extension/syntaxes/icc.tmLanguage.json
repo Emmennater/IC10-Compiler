@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ICC",
+  "scopeName": "source.icc",
+  "_comment": "Base lexical highlighting: gives VS Code a grammar for hover code fences and a fast fallback layer under the semantic tokens. Deliberately has NO bare-identifier rule, so unresolved identifiers stay uncoloured and the server's scope-aware semantic tokens own identifier colour. Keyword list mirrors the grammar / completions.ts KEYWORDS (single source of truth).",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#constants" },
+    { "include": "#devices" },
+    { "include": "#functions" },
+    { "include": "#keywords" }
+  ],
+  "repository": {
+    "functions": {
+      "begin": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.icc" },
+        "2": { "name": "entity.name.function.icc" },
+        "3": { "name": "punctuation.section.parameters.begin.icc" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parameters.end.icc" }
+      },
+      "patterns": [
+        { "match": ",", "name": "punctuation.separator.parameters.icc" },
+        { "match": "[A-Za-z_][A-Za-z0-9_]*", "name": "variable.parameter.icc" }
+      ]
+    },
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.icc"
+    },
+    "strings": {
+      "name": "string.quoted.double.icc",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.icc" }]
+    },
+    "numbers": {
+      "match": "\\b(0x[0-9a-fA-F]+|\\d+(\\.\\d+)?)\\b",
+      "name": "constant.numeric.icc"
+    },
+    "constants": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.icc"
+    },
+    "devices": {
+      "match": "\\b(d[0-5]|db)\\b",
+      "name": "variable.language.device.icc"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(let|constexpr|device|stack)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.icc" },
+            "2": { "name": "entity.name.variable.icc" }
+          }
+        },
+        {
+          "match": "\\b(const|define)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.icc" },
+            "2": { "name": "variable.other.constant.icc" }
+          }
+        },
+        {
+          "match": "\\b(if|then|elif|else|end|loop|while|do|repeat|until|for|in|of|break|continue|return|fn|import|from|using|yield|sleep)\\b",
+          "name": "keyword.control.icc"
+        }
+      ]
+    }
+  }
+}

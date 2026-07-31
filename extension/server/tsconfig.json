@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "lib": ["es2020"],
+    "module": "esnext",
+    // "bundler" resolution lets us import the compiler's `.ts` source
+    // specifiers directly for type-checking, matching what esbuild bundles.
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    // The extension lives inside the compiler repo, so `ic10-compiler/...`
+    // specifiers resolve to the sibling source rather than an npm package.
+    // esbuild reads these same paths when bundling (see esbuild.mjs).
+    "baseUrl": ".",
+    "paths": {
+      "ic10-compiler/*": ["../../*"]
+    },
+    // Parity with the compiler repo's tsconfig: it imports the generated
+    // lezer parser.js (no .d.ts) and is authored against these settings, so
+    // the shared source type-checks the same way here as it does there.
+    "allowJs": true,
+    "noEmit": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", ".vscode-test"]
+}
