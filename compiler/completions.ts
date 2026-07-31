@@ -7,6 +7,7 @@
 
 import type { SyntaxNode } from "./ast.ts";
 import { analyzeScopes, type SymbolKind } from "./scope.ts";
+import type { FileHandler } from "./modules.ts";
 
 export type CompletionKind = SymbolKind | "keyword";
 
@@ -39,10 +40,14 @@ const KEYWORD_COMPLETIONS: Completion[] = KEYWORDS.map((label) => ({ label, kind
  * On unparseable source (common mid-edit) the scope pass throws, and we fall
  * back to keywords alone rather than offering nothing.
  */
-export function getCompletions(ast: SyntaxNode, offset: number): Completion[] {
+export function getCompletions(
+  ast: SyntaxNode,
+  offset: number,
+  fileHandler?: FileHandler,
+): Completion[] {
   let symbols: Completion[] = [];
   try {
-    symbols = analyzeScopes(ast)
+    symbols = analyzeScopes(ast, fileHandler)
       .symbolsAt(offset)
       .map((s) => ({ label: s.name, kind: s.kind }));
   } catch {

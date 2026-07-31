@@ -1,9 +1,10 @@
 /**
- * Lexical scope analysis for editor features (completion, scope-aware
- * highlighting). This is a *separate, lighter* pass than lowering: it does not
- * build IR, it only answers "what names are in scope here" and "what does this
- * identifier occurrence refer to". Both editors (the VS Code language server
- * and CodeMirror) can consume it, so name resolution stays in one place.
+ * Lexical scope analysis for editor features (completion, hover, go-to-
+ * definition, rename, scope-aware highlighting). This is a *separate, lighter*
+ * pass than lowering: it builds no IR, it only answers "what names are in scope
+ * here", "what does this identifier refer to", and "where is it defined".
+ * Both editors (the VS Code language server and CodeMirror) consume it, so name
+ * resolution stays in one place.
  *
  * Scoping mirrors what the lowerer's ScopeChain does (symbols.ts): blocks nest,
  * a function body hides the caller's non-global locals, and globals are visible
@@ -11,10 +12,19 @@
  * visible in the whole scope it is declared in, not only after its line) -- that
  * suits "declared vs not" highlighting and forward references like recursion or
  * a function called above its definition.
+ *
+ * When a `FileHandler` is supplied, `import` names are resolved into the module
+ * they come from: the imported name takes the module binding's kind, and its
+ * definition site (module + range) is recorded so go-to-definition can cross
+ * files. Module scanning is shallow (one level, no following the module's own
+ * imports) and best-effort -- an unreadable or unparseable module just leaves
+ * the name as a generic `import`.
  */
 
 import type { SyntaxNode } from "./ast.ts";
+import { getAST } from "./ast.ts";
 import { getFormalAST } from "./formal-ast.ts";
+import { modulePath, type FileHandler } from "./modules.ts";
 import type {
   Block,
   Statement,
@@ -41,11 +51,36 @@ export type SymbolInfo = { name: string; kind: SymbolKind };
 /** How scope-aware highlighting should treat an identifier occurrence. */
 export type HighlightHint = "readonly" | "undeclared";
 
+/** Where an imported name is actually defined. */
+export type SymbolOrigin = { modulePath: string; range: Range };
+
+export type Sym = {
+  name: string;
+  kind: SymbolKind;
+  /** Identifier range of the binding site in *this* file (the `import` line for imports). */
+  declRange: Range;
+  /**
+   * A source snippet of the declaration, for hover: the whole statement for
+   * most bindings, just the header (`fn add(x, y)`) for functions, and the
+   * resolved module declaration for imports.
+   */
+  signature: string;
+  /** Set for imported names: the module and the definition range within it. */
+  origin?: SymbolOrigin;
+};
+
+/** One identifier occurrence and the symbol it resolves to (null = undeclared). */
+export type Occurrence = { range: Range; name: string; symbol: Sym | null };
+
 export type ScopeAnalysis = {
-  /** The hint for the identifier that starts at `from`, if any. */
+  /** The highlight hint for the identifier that starts at `from`, if any. */
   hintAt(from: number): HighlightHint | undefined;
   /** The names visible at a source offset, innermost shadowing outermost. */
   symbolsAt(offset: number): SymbolInfo[];
+  /** The identifier occurrence covering `offset`, if any. */
+  occurrenceAt(offset: number): Occurrence | undefined;
+  /** Every occurrence (declaration and uses) of one symbol, for rename. */
+  occurrencesOf(symbol: Sym): Occurrence[];
 };
 
 type ScopeNode = {
@@ -53,50 +88,140 @@ type ScopeNode = {
   parent: ScopeNode | null;
   /** True for a function body: caller locals above it are hidden. */
   functionBoundary: boolean;
-  symbols: Map<string, SymbolKind>;
+  symbols: Map<string, Sym>;
   children: ScopeNode[];
 };
-
-type Reference = { name: string; from: number; scope: ScopeNode };
 
 /** `const`/`define` are the read-only bindings the highlighter tints. */
 function isReadonlyKind(kind: SymbolKind): boolean {
   return kind === "const" || kind === "define";
 }
 
+function rangeOf(node: Range): Range {
+  return { from: node.from, to: node.to };
+}
+
+/**
+ * The source snippet shown on hover: the whole statement, except a function is
+ * cut at its body so only the header (`fn add(x, y)`) shows. `base` is the
+ * offset the `text` starts at (0 for a freshly parsed module, the root's `from`
+ * for the main file).
+ */
+function declSnippet(text: string, statement: Statement, base: number): string {
+  const start = statement.from - base;
+  const end = (statement.type === "functiondef" ? statement.body.from : statement.to) - base;
+  return text.slice(start, end).trim();
+}
+
+/** What a top-level statement declares, for scanning an imported module. */
+function topLevelDecl(statement: Statement): { name: string; kind: SymbolKind; range: Range } | undefined {
+  switch (statement.type) {
+    case "declaration":
+      return { name: statement.target.name, kind: statement.constant ? "const" : "var", range: rangeOf(statement.target) };
+    case "definedef":
+      return { name: statement.name.name, kind: "define", range: rangeOf(statement.name) };
+    case "devicedef":
+      return { name: statement.name.name, kind: "device", range: rangeOf(statement.name) };
+    case "stackdeclaration":
+      return { name: statement.name.name, kind: "stackvar", range: rangeOf(statement.name) };
+    case "arraydeclaration":
+      return { name: statement.name.name, kind: "list", range: rangeOf(statement.name) };
+    case "functiondef":
+      return { name: statement.name.name, kind: "function", range: rangeOf(statement.name) };
+    case "import":
+      return { name: statement.name.name, kind: "import", range: rangeOf(statement.name) };
+    default:
+      return undefined;
+  }
+}
+
+/** The kind, definition range, and hover snippet of one exported name. */
+function moduleExport(
+  source: string,
+  name: string,
+): { kind: SymbolKind; range: Range; signature: string } | undefined {
+  let module: Block;
+  try {
+    module = getFormalAST(getAST(source));
+  } catch {
+    return undefined; // module doesn't parse; leave the import generic
+  }
+  for (const statement of module.statements) {
+    const decl = topLevelDecl(statement);
+    if (decl && decl.name === name) {
+      return { kind: decl.kind, range: decl.range, signature: declSnippet(source, statement, 0) };
+    }
+  }
+  return undefined;
+}
+
 /**
  * Analyze the program's scopes. Throws whatever `getFormalAST` throws on a
- * syntax error, so callers doing best-effort work on half-typed source should
- * catch and fall back.
+ * syntax error in the *main* file, so callers doing best-effort work on
+ * half-typed source should catch and fall back. (Errors in imported modules are
+ * swallowed; that import just stays unresolved.)
  */
-export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
+export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): ScopeAnalysis {
   const module = getFormalAST(ast);
+  // The root node's text is the whole file; `ast.from` is where it starts, so
+  // absolute node offsets map into it as `offset - ast.from`.
+  const source = ast.text;
+  const snippetOf = (statement: Statement): string => declSnippet(source, statement, ast.from);
 
   const root: ScopeNode = {
-    range: { from: ast.from, to: ast.to },
+    range: rangeOf(ast),
     parent: null,
     functionBoundary: false,
     symbols: new Map(),
     children: [],
   };
-  const references: Reference[] = [];
+  const occurrences: Occurrence[] = [];
+  const pendingRefs: { occ: Occurrence; name: string; scope: ScopeNode }[] = [];
   const hints = new Map<number, HighlightHint>();
 
   function childScope(parent: ScopeNode, range: Range, functionBoundary = false): ScopeNode {
-    const scope: ScopeNode = { range, parent, functionBoundary, symbols: new Map(), children: [] };
+    const scope: ScopeNode = { range: rangeOf(range), parent, functionBoundary, symbols: new Map(), children: [] };
     parent.children.push(scope);
     return scope;
   }
 
-  function bind(scope: ScopeNode, ident: Identifier, kind: SymbolKind): void {
-    scope.symbols.set(ident.name, kind);
-    // A declaration site is highlighted by its own kind; readonly ones get the
-    // same tint as their uses.
+  function bind(
+    scope: ScopeNode,
+    ident: Identifier,
+    kind: SymbolKind,
+    signature: string,
+    origin?: SymbolOrigin,
+  ): void {
+    const symbol: Sym = { name: ident.name, kind, declRange: rangeOf(ident), signature, origin };
+    scope.symbols.set(ident.name, symbol);
+    occurrences.push({ range: rangeOf(ident), name: ident.name, symbol });
     if (isReadonlyKind(kind)) hints.set(ident.from, "readonly");
   }
 
   function reference(ident: Identifier, scope: ScopeNode): void {
-    references.push({ name: ident.name, from: ident.from, scope });
+    const occ: Occurrence = { range: rangeOf(ident), name: ident.name, symbol: null };
+    occurrences.push(occ);
+    pendingRefs.push({ occ, name: ident.name, scope });
+  }
+
+  function resolveImport(statement: Extract<Statement, { type: "import" }>): {
+    kind: SymbolKind;
+    signature: string;
+    origin?: SymbolOrigin;
+  } {
+    // Fallback: the import line itself, when the module can't be resolved.
+    const fallback = { kind: "import" as SymbolKind, signature: snippetOf(statement) };
+    if (!fileHandler) return fallback;
+    const path = modulePath(statement.path);
+    const moduleSource = fileHandler(path);
+    if (typeof moduleSource !== "string") return fallback;
+    const exported = moduleExport(moduleSource, statement.name.name);
+    if (!exported) return fallback;
+    return {
+      kind: exported.kind,
+      signature: exported.signature,
+      origin: { modulePath: path, range: exported.range },
+    };
   }
 
   function walkBlock(block: Block, scope: ScopeNode): void {
@@ -106,7 +231,7 @@ export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
   function walkStatement(statement: Statement, scope: ScopeNode): void {
     switch (statement.type) {
       case "declaration":
-        bind(scope, statement.target, statement.constant ? "const" : "var");
+        bind(scope, statement.target, statement.constant ? "const" : "var", snippetOf(statement));
         if (statement.value) walkExpr(statement.value, scope);
         break;
       case "assignment":
@@ -162,34 +287,39 @@ export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
         walkExpr(statement.value, scope);
         break;
       case "definedef":
-        bind(scope, statement.name, "define");
+        bind(scope, statement.name, "define", snippetOf(statement));
         walkExpr(statement.value, scope);
         break;
       case "devicedef":
-        bind(scope, statement.name, "device");
+        bind(scope, statement.name, "device", snippetOf(statement));
         break;
       case "stackdeclaration":
-        bind(scope, statement.name, "stackvar");
+        bind(scope, statement.name, "stackvar", snippetOf(statement));
         if (statement.value) walkExpr(statement.value, scope);
         break;
       case "arraydeclaration":
-        bind(scope, statement.name, "list");
+        bind(scope, statement.name, "list", snippetOf(statement));
         walkExpr(statement.size, scope);
         if (statement.list) for (const el of statement.list.elements) walkExpr(el, scope);
         break;
       case "functiondef": {
-        bind(scope, statement.name, "function");
+        // The header (`fn add(x, y)`) is the snippet for the function and for
+        // each of its parameters -- hovering a parameter shows it in context.
+        const header = snippetOf(statement);
+        bind(scope, statement.name, "function", header);
         const fnScope = childScope(scope, statement, true);
-        for (const arg of statement.args) bind(fnScope, arg, "param");
+        for (const arg of statement.args) bind(fnScope, arg, "param", header);
         walkBlock(statement.body, fnScope);
         break;
       }
       case "functioncall":
         walkExpr(statement, scope);
         break;
-      case "import":
-        bind(scope, statement.name, "import");
+      case "import": {
+        const { kind, signature, origin } = resolveImport(statement);
+        bind(scope, statement.name, kind, signature, origin);
         break;
+      }
       // No names, no sub-expressions.
       case "break":
       case "continue":
@@ -252,14 +382,14 @@ export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
   }
 
   /** Resolve a name from `scope` outward, honouring the function boundary. */
-  function resolve(name: string, scope: ScopeNode): SymbolKind | undefined {
+  function resolve(name: string, scope: ScopeNode): Sym | undefined {
     let crossedBoundary = false;
     for (let s: ScopeNode | null = scope; s; s = s.parent) {
       const isGlobal = s.parent === null;
       if (isGlobal) return s.symbols.get(name);
       if (!crossedBoundary) {
-        const kind = s.symbols.get(name);
-        if (kind !== undefined) return kind;
+        const symbol = s.symbols.get(name);
+        if (symbol !== undefined) return symbol;
       }
       if (s.functionBoundary) crossedBoundary = true;
     }
@@ -271,12 +401,13 @@ export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
 
   // Phase 2: every declaration is in place, so references resolve against the
   // complete tree (this is what makes forward references and recursion work).
-  for (const ref of references) {
-    const kind = resolve(ref.name, ref.scope);
-    if (kind === undefined) {
-      hints.set(ref.from, "undeclared");
-    } else if (isReadonlyKind(kind) && !hints.has(ref.from)) {
-      hints.set(ref.from, "readonly");
+  for (const { occ, name, scope } of pendingRefs) {
+    const symbol = resolve(name, scope);
+    occ.symbol = symbol ?? null;
+    if (!symbol) {
+      hints.set(occ.range.from, "undeclared");
+    } else if (isReadonlyKind(symbol.kind) && !hints.has(occ.range.from)) {
+      hints.set(occ.range.from, "readonly");
     }
   }
 
@@ -295,13 +426,15 @@ export function analyzeScopes(ast: SyntaxNode): ScopeAnalysis {
 
   return {
     hintAt: (from) => hints.get(from),
+    occurrenceAt: (offset) => occurrences.find((o) => offset >= o.range.from && offset <= o.range.to),
+    occurrencesOf: (symbol) => occurrences.filter((o) => o.symbol === symbol),
     symbolsAt: (offset) => {
       const seen = new Map<string, SymbolKind>();
       let crossedBoundary = false;
       for (let s: ScopeNode | null = innermostScopeAt(offset); s; s = s.parent) {
         const isGlobal = s.parent === null;
         if (!crossedBoundary || isGlobal) {
-          for (const [name, kind] of s.symbols) if (!seen.has(name)) seen.set(name, kind);
+          for (const [name, symbol] of s.symbols) if (!seen.has(name)) seen.set(name, symbol.kind);
         }
         if (s.functionBoundary) crossedBoundary = true;
       }
