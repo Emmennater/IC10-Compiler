@@ -288,6 +288,7 @@
 .tok-declaration { color: var(--theme-declaration); }
 .tok-function { color: var(--theme-function); }
 .tok-number { color: var(--theme-number); }
+.tok-bool { color: var(--theme-bool); }
 .tok-variable { color: var(--theme-variable); }
 .tok-string { color: var(--theme-string); }
 .tok-comment { color: var(--theme-comment); }

@@ -6,6 +6,7 @@
   "version": "1.0.0",
   "publisher": "emmettdj",
   "categories": [],
+  "repository": "https://github.com/Emmennater/IC10-Compiler",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -88,9 +89,9 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -b client && npm --prefix server run build",
+    "compile": "npm --prefix client run build && npm --prefix server run build",
     "watch": "npm --prefix server run watch",
-    "typecheck": "tsc -b client && npm --prefix server run typecheck",
+    "typecheck": "npm --prefix client run typecheck && npm --prefix server run typecheck",
     "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
     "package": "vsce package"
   },

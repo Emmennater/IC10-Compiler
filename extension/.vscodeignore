@@ -1,14 +1,11 @@
-# Server is bundled by esbuild into server/out/server.js, so its
-# node_modules and source aren't needed at runtime.
+# Both halves are bundled by esbuild into their out/*.js, so neither's
+# node_modules nor source is needed at runtime.
 server/node_modules/**
 server/src/**
 server/esbuild.mjs
-
-# Client is only tsc-compiled (not bundled), so client/node_modules IS
-# needed at runtime -- only its source and dev-only type declarations
-# (never referenced by the compiled JS) are excluded.
+client/node_modules/**
 client/src/**
-client/node_modules/@types/**
+client/esbuild.mjs
 
 # Build/dev metadata, not needed at runtime
 **/tsconfig.json

@@ -9,6 +9,7 @@
     "deploy": "gh-pages -d dist",
     "typecheck": "tsc --noEmit",
     "sync": "powershell -ExecutionPolicy Bypass -File ./sync-main.ps1 -Push",
+    "package:ext": "npm --prefix extension run package",
     "test": "vitest run",
     "test:cases": "node tests/test.mjs",
     "lezer": "lezer-generator lezer/lang.grammar -o lezer/parser.js",
