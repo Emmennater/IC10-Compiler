@@ -10,7 +10,7 @@ IC10 is an assembly language: no expressions, no scopes, eighteen registers, and
 
 ## How to read this page
 
-Every example below is compiled by the real compiler when this page loads. Click the **IC10** header under any example to expand the assembly it produces; blocks labelled **Error** are programs that are *rejected*, shown with the exact message you get. Nothing here is transcribed by hand, so nothing here can drift from the compiler.
+Every example below is compiled by the real compiler. Click the **IC10** header under any example to expand the assembly it produces; blocks labelled **Error** are programs that are *rejected*, shown with the exact message you get. Nothing here is transcribed by hand, so nothing here can drift from the compiler.
 
 ```icc {% compile=true %}
 device sensor = d0
