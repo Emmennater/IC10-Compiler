@@ -1552,7 +1552,7 @@ class FrameLowerer {
     if (list.size === 0) return; // Empty list
 
     node.decl.value = { type: "constant", value: 0 } as Constant;
-    this.processStatement(node.decl);
+    this.processDeclaration(node.decl, true);
 
     const updateNode = {
       from: node.from,
@@ -1619,7 +1619,7 @@ class FrameLowerer {
 
     if (list.size === 0) return; // Empty list
 
-    this.processStatement(node.decl);
+    this.processDeclaration(node.decl, true);
     
     // The index used to iterate over the list
     const indexVreg = this.ids.newVreg();
@@ -1999,10 +1999,10 @@ class FrameLowerer {
     }
   }
 
-  private processDeclaration(statement: Declaration): void {
+  private processDeclaration(statement: Declaration, constSafe = false): void {
     this.checkUndeclared(statement.target);
     const name = statement.target.name;
-    if (statement.constant && !statement.value) {
+    if (statement.constant && !statement.value && !constSafe) {
       throw this.errors.error(`Constant ${name} must be assigned a value`, statement);
     }
     // The initializer is evaluated before the name is bound, so a
