@@ -308,8 +308,8 @@ function declaredNames(def: FunctionDef): Set<string> {
       case "arraydeclaration":
       case "stackdeclaration":
       case "devicedef":
-      case "definedef":
-      case "import": names.add(node.name.name); break;
+      case "definedef": names.add(node.name.name); break;
+      case "import": for (const n of node.names) names.add(n.name); break;
       case "functiondef": for (const arg of node.args) names.add(arg.name); break;
       default: break;
     }
@@ -432,16 +432,19 @@ export class ModuleScanner {
           break;
         }
         case "import": {
-          const name = statement.name.name;
-          // A name this module cannot offer either is still a name it binds.
-          const exported = this.scan(statement, errors).exports.get(name);
-          if (!exported) {
-            scan.blocked.add(name);
-            break;
+          const inner = this.scan(statement, errors);
+          for (const ident of statement.names) {
+            const name = ident.name;
+            // A name this module cannot offer either is still a name it binds.
+            const exported = inner.exports.get(name);
+            if (!exported) {
+              scan.blocked.add(name);
+              continue;
+            }
+            scan.exports.set(name, exported);
+            if (exported.kind === "const") scan.constants.set(name, exported.value);
+            else if (exported.kind === "fn") scan.blocked.add(name);
           }
-          scan.exports.set(name, exported);
-          if (exported.kind === "const") scan.constants.set(name, exported.value);
-          else if (exported.kind === "fn") scan.blocked.add(name);
           break;
         }
         default:

@@ -2640,6 +2640,61 @@ export const cases = {
     ],
     expected: "s d0 Setting 3",
   },
+  "one import line can name a comma-separated list": {
+    modules: { ExampleFileA: ["stack idle = false", "const size = 2", "let arr[size] = [1, 2]"] },
+    source: [
+      'import idle, arr, size from "ExampleFileA" using d0',
+      "d1.Setting = idle",
+      "d2.Setting = arr[0]",
+      "d3.Setting = size",
+    ],
+    // `using d0` serves idle and arr; size is a constant and just ignores it.
+    expected: [
+      "get r0 d0 511",
+      "s d1 Setting r0",
+      "get r0 d0 509",
+      "s d2 Setting r0",
+      "s d3 Setting 2",
+    ]
+  },
+  "a comma-separated import list can pull in several functions": {
+    modules: {
+      ExampleFileA: [
+        "fn double(x)", "  return x * 2", "end",
+        "fn triple(x)", "  return x * 3", "end",
+      ],
+    },
+    source: [
+      'import double, triple from "ExampleFileA"',
+      "d0.Setting = double(d1.Setting) + triple(d2.Setting)",
+    ],
+    expected: [
+      "l r0 d1 Setting",
+      "mul r0 r0 2",
+      "l r1 d2 Setting",
+      "mul r1 r1 3",
+      "add r0 r0 r1",
+      "s d0 Setting r0",
+    ],
+  },
+  "each name in a comma-separated import is checked on its own": {
+    modules: { ExampleFileA: "const size = 2" },
+    source: 'import size, nope from "ExampleFileA"',
+    error: 'Line 0: nope is not declared in "ExampleFileA"',
+  },
+  "using on a comma-separated import serves the names that need it and is ignored by the rest": {
+    modules: { ExampleFileA: "stack idle = false\nconst size = 2" },
+    source: [
+      'import idle, size from "ExampleFileA" using d0',
+      "d1.Setting = idle",
+      "d2.Setting = size",
+    ],
+    expected: [
+      "get r0 d0 511",
+      "s d1 Setting r0",
+      "s d2 Setting 2",
+    ],
+  },
   "a missing module is an error": {
     source: 'import x from "Nope"',
     error: 'Line 0: Cannot find module "Nope"',

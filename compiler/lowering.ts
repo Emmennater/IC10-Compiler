@@ -320,9 +320,7 @@ export class Lowerer {
    *     let arr[size] = [1, 2]
    *
    *     # ExampleFileB
-   *     import idle from "ExampleFileA" using d0
-   *     import arr from "ExampleFileA" using d0
-   *     import size from "ExampleFileA"
+   *     import idle, arr, size from "ExampleFileA" using d0
    *     d1.Setting = idle
    *     d2.Setting = arr[0]
    *     d3.Setting = size
@@ -338,6 +336,14 @@ export class Lowerer {
    * itself it offers on: an export travels through a chain of modules, and the
    * pin does not, since the address (or the body) still belongs to whichever
    * chip first declared it.
+   *
+   * `import` accepts a comma-separated list of names, all read from the same
+   * module with the same `using`. The device serves whichever names in the
+   * list actually need one; `size` above just ignores it. That is why the
+   * "constant read from a device" error below only fires for a lone name -
+   * `import size from "..." using d0` alone could never read the device it
+   * names, but `import idle, size from "..." using d0` has another name right
+   * there that does.
    */
   private registerImports(fileHandler: FileHandler, globals: ScopeChain): void {
     const { errors, fnTable } = this.services;
@@ -347,56 +353,65 @@ export class Lowerer {
     // registered: a function pulled in as somebody else's callee picks its
     // own name here, and it must not take one this program spelled out.
     for (const statement of this.ast.statements) {
-      if (statement.type === "import") this.importedNames.add(statement.name.name);
+      if (statement.type === "import") {
+        for (const ident of statement.names) this.importedNames.add(ident.name);
+      }
     }
 
     for (const statement of this.ast.statements) {
       if (statement.type !== "import") continue;
-      const name = statement.name.name;
-      if (globals.lookup(name) || fnTable.has(name)) {
-        throw errors.error(`${name} was already defined`, statement.name);
-      }
-
       const scan = scanner.scan(statement, errors);
       const path = scan.path;
-      const exported = scan.exports.get(name);
-      if (!exported) {
-        throw errors.error(`${name} is not declared in ${JSON.stringify(path)}`, statement.name);
-      }
       const pin = statement.device?.name ?? null;
 
-      if (exported.kind === "const") {
-        if (statement.device) {
-          throw errors.error(
-            `${name} is a constant in ${JSON.stringify(path)}; it is not read from a device`,
-            statement.device);
+      for (const ident of statement.names) {
+        const name = ident.name;
+        if (globals.lookup(name) || fnTable.has(name)) {
+          throw errors.error(`${name} was already defined`, ident);
         }
-        // Identical to a local `const`: a value the rest of the compile folds.
-        globals.declare(name, {
-          kind: "var",
-          state: { value: exported.value, maybe: false, home: null },
-          constant: true,
-        });
-        continue;
-      }
 
-      if (exported.kind === "fn") {
-        const fn = this.registerModuleFunction(
-          exported.owner, name, exported.def, pin, name, statement);
-        // Already pulled in as another function's callee, under a name this
-        // program did not choose: bind the asked-for name to the same body.
-        if (fn.name !== name) fnTable.set(name, fn);
-        continue;
-      }
+        const exported = scan.exports.get(name);
+        if (!exported) {
+          throw errors.error(`${name} is not declared in ${JSON.stringify(path)}`, ident);
+        }
 
-      if (!pin) {
-        throw errors.error(
-          `${name} lives in ${JSON.stringify(path)}'s stack memory; ` +
-          "say which device it is on (`using d0`)", statement);
+        if (exported.kind === "const") {
+          // A single-name `using` on a constant is almost certainly a mistake
+          // - the device would never be read - so it errors. In a
+          // comma-separated list it is not: the device serves whichever other
+          // names in the line need it, and a constant among them just ignores it.
+          if (statement.device && statement.names.length === 1) {
+            throw errors.error(
+              `${name} is a constant in ${JSON.stringify(path)}; it is not read from a device`,
+              statement.device);
+          }
+          // Identical to a local `const`: a value the rest of the compile folds.
+          globals.declare(name, {
+            kind: "var",
+            state: { value: exported.value, maybe: false, home: null },
+            constant: true,
+          });
+          continue;
+        }
+
+        if (exported.kind === "fn") {
+          const fn = this.registerModuleFunction(
+            exported.owner, name, exported.def, pin, name, statement);
+          // Already pulled in as another function's callee, under a name this
+          // program did not choose: bind the asked-for name to the same body.
+          if (fn.name !== name) fnTable.set(name, fn);
+          continue;
+        }
+
+        if (!pin) {
+          throw errors.error(
+            `${name} lives in ${JSON.stringify(path)}'s stack memory; ` +
+            "say which device it is on (`using d0`)", statement);
+        }
+        globals.declare(name, exported.kind === "stackvar"
+          ? { kind: "stackvar", addr: exported.addr, device: pin }
+          : { kind: "list", start: exported.start, size: exported.size, device: pin });
       }
-      globals.declare(name, exported.kind === "stackvar"
-        ? { kind: "stackvar", addr: exported.addr, device: pin }
-        : { kind: "list", start: exported.start, size: exported.size, device: pin });
     }
   }
 
