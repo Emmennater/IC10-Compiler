@@ -259,7 +259,7 @@ export type FunctionDef = Range & {
 
 export type Import = Range & {
   type: "import";
-  name: Identifier;
+  names: Identifier[];
   path: StringExpr;
   device?: Device;
 };
@@ -966,8 +966,10 @@ export function convertStatement(node: SyntaxNode): Statement {
 
     case "ArrayDeclaration": {
       const nameNode = parts.find(c => c.type === "VariableName");
+      if (!nameNode) fail("Malformed array declaration", node);
+      // The size is optional in the grammar: an array assigned an initializer
+      // list may omit it and take its size from the list instead.
       const sizeNode = betweenBrackets(node).find(c => EXPRESSION_TYPES.has(c.type));
-      if (!nameNode || !sizeNode) fail("Malformed array declaration", node);
       const listNode = parts.find(c => c.type === "List");
       if (listNode) {
         const list = betweenBrackets(listNode).filter(c => EXPRESSION_TYPES.has(c.type)).map(convertExpression);
@@ -975,7 +977,9 @@ export function convertStatement(node: SyntaxNode): Statement {
           ...rangeOf(node),
           type: "arraydeclaration",
           name: convertIdentifier(nameNode),
-          size: convertExpression(sizeNode),
+          size: sizeNode
+            ? convertExpression(sizeNode)
+            : { type: "constant", ...rangeOf(node), value: list.length },
           list: {
             type: "list",
             from: listNode.from,
@@ -984,6 +988,7 @@ export function convertStatement(node: SyntaxNode): Statement {
           } as List,
         } as ArrayDeclaration;
       } else {
+        if (!sizeNode) fail("Array size must be given explicitly or inferred from an initializer list", node);
         return {
           ...rangeOf(node),
           type: "arraydeclaration",
@@ -994,14 +999,14 @@ export function convertStatement(node: SyntaxNode): Statement {
     }
 
     case "Import": {
-      const nameNode = parts.find(c => c.type === "VariableName");
+      const nameNodes = parts.filter(c => c.type === "VariableName");
       const pathNode = parts.find(c => c.type === "String");
       const deviceNode = parts.find(c => c.type === "Device");
-      if (!nameNode || !pathNode) fail("Malformed import", node);
+      if (nameNodes.length === 0 || !pathNode) fail("Malformed import", node);
       return {
         ...rangeOf(node),
         type: "import",
-        name: convertIdentifier(nameNode),
+        names: nameNodes.map(convertIdentifier),
         path: { type: "string", from: pathNode.from, to: pathNode.to, value: pathNode.text },
         device: deviceNode ? convertDevice(deviceNode) : undefined,
       };
@@ -1074,6 +1079,6 @@ export function childrenOf(node: FormalSyntaxNode): FormalSyntaxNode[] {
     case "arraydeclaration":
       return [node.name, node.size, ...(node.list ? node.list.elements : [])];
     case "listindexing": return [node.list, node.index];
-    case "import": return [node.name, node.path, node.device].filter(c => c !== undefined);
+    case "import": return [...node.names, node.path, node.device].filter(c => c !== undefined);
   }
 }

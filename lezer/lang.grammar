@@ -24,7 +24,7 @@ Declaration {
 }
 
 ArrayDeclaration {
-  kw<"let"> VariableName !list BracketLeft expression BracketRight
+  kw<"let"> VariableName !list BracketLeft expression? BracketRight
   (Assign List)?
 }
 
@@ -76,7 +76,7 @@ PreprocessorDirective { At DirectiveName }
 
 DirectiveName { kw_<"constexpr"> }
 
-Import { kw<"import"> VariableName kw<"from"> String (kw<"using"> Device)? }
+Import { kw<"import"> VariableName (Comma VariableName)* kw<"from"> String (kw<"using"> Device)? }
 
 expression { Number | Bool | Value | Parens | UnaryOp | BinaryOp | TernaryOp | FunctionCall | String }
 

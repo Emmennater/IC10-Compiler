@@ -591,6 +591,18 @@ The two forms differ in what they need, and which one applies follows from what 
 - **Stack memory** — a `stack` variable or a list — lives on the chip running that module, so reading it takes a device. `using d0` says which pin this chip sees that chip on. Its addresses are the module's; nothing is reserved locally, so the importing program's own lists and spills are unaffected.
 - **A `const`** is a compile-time value. Importing one substitutes the value, reads no device, and emits nothing — `size` above became the literal `2`.
 
+Several names can share one `import` line, separated by commas:
+
+```icc {% compile=true %}
+import idle, arr, size from "sensor-hub" using d0
+
+d1.Setting = idle
+d2.Setting = arr[0]
+d3.Setting = size
+```
+
+`using` serves whichever names in the line need a device; a `const` among them — `size` here — just ignores it.
+
 Imported stack memory is writable, and a write goes to the other chip:
 
 ```icc {% compile=true %}
@@ -604,7 +616,7 @@ arr[1] = d1.Setting
 Addresses are worked out by reading the module's declarations, in order, so the two programs must agree about them: **recompile the importing program whenever the module's `stack`, list, or `const` declarations change.** Inserting a `stack` line at the top of a module moves everything below it.
 {% /callout %}
 
-Writing `using` on the wrong kind of import is an error rather than something the compiler quietly ignores, since the two forms compile to entirely different things:
+Writing `using` on a constant is an error, unless it's sharing a comma-separated line with a name that does need the device — a bare `import size from "sensor-hub" using d0` could never read it:
 
 ```icc {% error=true %}
 import size from "sensor-hub" using d0
@@ -894,6 +906,7 @@ These are reserved and cannot be used as names.
 | `stack x` / `stack x = e` | one cell of stack memory |
 | `import x from "p"` | another module's `const`, or its `fn` |
 | `import x from "p" using d0` | another module's stack memory, or a `fn` that reads `db` |
+| `import x, y from "p"` | multiple names from one module; `using d0` serves whichever ones need a device |
 | `define X = e` | in-chip define |
 | `device p = d0` | device alias |
 | `x = e` / `x op= e` | assignment |

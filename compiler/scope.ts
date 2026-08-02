@@ -114,24 +114,24 @@ function declSnippet(text: string, statement: Statement, base: number): string {
 }
 
 /** What a top-level statement declares, for scanning an imported module. */
-function topLevelDecl(statement: Statement): { name: string; kind: SymbolKind; range: Range } | undefined {
+function topLevelDecl(statement: Statement): { name: string; kind: SymbolKind; range: Range }[] {
   switch (statement.type) {
     case "declaration":
-      return { name: statement.target.name, kind: statement.constant ? "const" : "var", range: rangeOf(statement.target) };
+      return [{ name: statement.target.name, kind: statement.constant ? "const" : "var", range: rangeOf(statement.target) }];
     case "definedef":
-      return { name: statement.name.name, kind: "define", range: rangeOf(statement.name) };
+      return [{ name: statement.name.name, kind: "define", range: rangeOf(statement.name) }];
     case "devicedef":
-      return { name: statement.name.name, kind: "device", range: rangeOf(statement.name) };
+      return [{ name: statement.name.name, kind: "device", range: rangeOf(statement.name) }];
     case "stackdeclaration":
-      return { name: statement.name.name, kind: "stackvar", range: rangeOf(statement.name) };
+      return [{ name: statement.name.name, kind: "stackvar", range: rangeOf(statement.name) }];
     case "arraydeclaration":
-      return { name: statement.name.name, kind: "list", range: rangeOf(statement.name) };
+      return [{ name: statement.name.name, kind: "list", range: rangeOf(statement.name) }];
     case "functiondef":
-      return { name: statement.name.name, kind: "function", range: rangeOf(statement.name) };
+      return [{ name: statement.name.name, kind: "function", range: rangeOf(statement.name) }];
     case "import":
-      return { name: statement.name.name, kind: "import", range: rangeOf(statement.name) };
+      return statement.names.map(ident => ({ name: ident.name, kind: "import" as SymbolKind, range: rangeOf(ident) }));
     default:
-      return undefined;
+      return [];
   }
 }
 
@@ -147,9 +147,10 @@ function moduleExport(
     return undefined; // module doesn't parse; leave the import generic
   }
   for (const statement of module.statements) {
-    const decl = topLevelDecl(statement);
-    if (decl && decl.name === name) {
-      return { kind: decl.kind, range: decl.range, signature: declSnippet(source, statement, 0) };
+    for (const decl of topLevelDecl(statement)) {
+      if (decl.name === name) {
+        return { kind: decl.kind, range: decl.range, signature: declSnippet(source, statement, 0) };
+      }
     }
   }
   return undefined;
@@ -204,7 +205,7 @@ export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): Scope
     pendingRefs.push({ occ, name: ident.name, scope });
   }
 
-  function resolveImport(statement: Extract<Statement, { type: "import" }>): {
+  function resolveImport(statement: Extract<Statement, { type: "import" }>, ident: Identifier): {
     kind: SymbolKind;
     signature: string;
     origin?: SymbolOrigin;
@@ -215,7 +216,7 @@ export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): Scope
     const path = modulePath(statement.path);
     const moduleSource = fileHandler(path);
     if (typeof moduleSource !== "string") return fallback;
-    const exported = moduleExport(moduleSource, statement.name.name);
+    const exported = moduleExport(moduleSource, ident.name);
     if (!exported) return fallback;
     return {
       kind: exported.kind,
@@ -316,8 +317,10 @@ export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): Scope
         walkExpr(statement, scope);
         break;
       case "import": {
-        const { kind, signature, origin } = resolveImport(statement);
-        bind(scope, statement.name, kind, signature, origin);
+        for (const ident of statement.names) {
+          const { kind, signature, origin } = resolveImport(statement, ident);
+          bind(scope, ident, kind, signature, origin);
+        }
         break;
       }
       // No names, no sub-expressions.
