@@ -20,7 +20,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 // server reuses the exact parse + compile path the CodeMirror editor uses
 // (see IC10-Compiler/main.js), so diagnostics can never drift between editors.
 import { getAST } from "ic10-compiler/compiler/ast.ts";
-import { compile, CompileError } from "ic10-compiler/compiler/index.ts";
+import { compile, diagnose, CompileError } from "ic10-compiler/compiler/index.ts";
 import { getCompletions } from "ic10-compiler/compiler/completions.ts";
 import { analyzeScopes, type ScopeAnalysis, type Sym } from "ic10-compiler/compiler/scope.ts";
 
@@ -71,7 +71,12 @@ function fileHandlerFor(document: TextDocument): FileHandler {
   return makeFileHandler(document.uri, documents.all());
 }
 
-/** Scope analysis for a document, or undefined when its source doesn't parse. */
+/**
+ * Scope analysis for a document. `analyzeScopes` converts leniently, so this
+ * answers over half-typed source too -- the statements that do not parse are
+ * simply absent from the tree it walked. The guard is for a fault in the
+ * analysis itself, which must not take a hover or a rename down with it.
+ */
 function analysisFor(document: TextDocument): ScopeAnalysis | undefined {
   try {
     return analyzeScopes(getAST(document.getText()), fileHandlerFor(document));
@@ -229,26 +234,29 @@ connection.onRequest("icc/compile", ({ uri }: { uri: string }): CompileResult =>
 });
 
 /**
- * Run the compiler over the document and publish whatever it complains about.
+ * Run the compiler over the document and publish everything it complains about.
  *
  * All the language knowledge lives in the compiler; this function's only job
  * is to translate between the compiler's world (character offsets on a
  * `CompileError`) and LSP's world (line/character ranges), which
  * `TextDocument.positionAt` does directly.
  *
- * The compiler currently throws on the first error it hits, so at most one
- * diagnostic is reported per pass. When `ErrorReporter`/`checkSyntax` are
- * reworked to collect errors instead of throwing, this loop can push many.
+ * `diagnose` is the compiler's collecting entry point -- unlike `compile` it
+ * recovers past an error where recovery is honest (per statement while parsing,
+ * per top-level statement while lowering), so a file with several mistakes
+ * underlines all of them rather than one per save. It returns the errors
+ * instead of throwing; a throw out of it is a fault in the compiler, and still
+ * gets surfaced rather than swallowed.
  */
 function validateTextDocument(textDocument: TextDocument): void {
-  const text = textDocument.getText();
   const diagnostics: Diagnostic[] = [];
 
   try {
-    // Compile purely for its diagnostics; the emitted assembly is discarded.
-    // `removeLabels` is irrelevant here. Imports resolve through the workspace
-    // file handler, so errors inside imported modules surface too.
-    compileDocument(textDocument, false);
+    // Diagnostics only; no assembly is produced or wanted, which is why
+    // `removeLabels` has no counterpart here. Imports resolve through the
+    // workspace file handler, so errors inside imported modules surface too.
+    const errors = diagnose(getAST(textDocument.getText()), {}, fileHandlerFor(textDocument));
+    for (const error of errors) diagnostics.push(toDiagnostic(error, textDocument));
   } catch (error) {
     diagnostics.push(toDiagnostic(error, textDocument));
   }

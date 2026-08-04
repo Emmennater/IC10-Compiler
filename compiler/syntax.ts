@@ -74,11 +74,36 @@ export function kids(node: SyntaxNode): SyntaxNode[] {
   return node.children.filter(c => c.type !== "Comment");
 }
 
+/** The first parse-error node ("⚠") in a subtree, in document order. */
+export function firstSyntaxError(node: SyntaxNode): SyntaxNode | undefined {
+  if (node.type === "⚠") return node;
+  for (const child of node.children) {
+    const found = firstSyntaxError(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Every parse-error node in a subtree, in document order. The recovering
+ * conversion reports all of them; `checkSyntax` stops at the first, which is
+ * all `compile()` can act on.
+ */
+export function syntaxErrorNodes(node: SyntaxNode): SyntaxNode[] {
+  const found: SyntaxNode[] = [];
+  // An error node's own children are the tokens it swallowed, so reporting the
+  // outermost one is one diagnostic per broken span rather than per token.
+  const visit = (n: SyntaxNode): void => {
+    if (n.type === "⚠") { found.push(n); return; }
+    for (const child of n.children) visit(child);
+  };
+  visit(node);
+  return found;
+}
+
 /** Reject any parse-error node (the grammar marks them with "⚠"). */
 export function checkSyntax(node: SyntaxNode, errors: ErrorReporter): void {
-  if (node.type === "⚠") {
-    throw errors.error("Syntax error", node);
-  }
-  for (const child of node.children) checkSyntax(child, errors);
+  const bad = firstSyntaxError(node);
+  if (bad) throw errors.error("Syntax error", bad);
 }
 

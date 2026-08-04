@@ -76,7 +76,7 @@ function mappingFor(classes: string): { type: string; modifiers?: string[] } | u
 /** Only identifier tokens carry scope meaning (const-ness, declaredness). */
 const IDENTIFIER_CLASS = /\btok-(variable|function)\b/;
 
-/** Scope analysis, or undefined when the source doesn't parse (mid-edit). */
+/** Scope analysis, or undefined if the analysis itself faults. */
 function tryAnalyzeScopes(text: string, fileHandler?: FileHandler): ScopeAnalysis | undefined {
   try {
     return analyzeScopes(getAST(text), fileHandler);
@@ -91,8 +91,19 @@ function tryAnalyzeScopes(text: string, fileHandler?: FileHandler): ScopeAnalysi
  *
  * On top of the lexical colouring, scope analysis refines identifier tokens:
  * `const`/`define` names get the `readonly` modifier, and identifiers that
- * resolve to nothing are left unhighlighted (no token emitted). When the source
- * doesn't parse, that refinement is skipped and plain colouring stands.
+ * resolve to nothing are left unhighlighted (no token emitted).
+ *
+ * The colouring never depends on the document being valid. Lezer recovers from
+ * a parse error on its own, so `highlightSegments` colours a broken file the
+ * same as any other, and `analyzeScopes` now converts leniently, so `readonly`
+ * survives an error elsewhere in the file too.
+ *
+ * What an error does suppress is the *undeclared* half of the refinement, and
+ * only that half: a statement that failed to convert is absent from the tree
+ * the analysis walked, so what it declared resolves to nothing -- and blanking
+ * every use of a name whose `let` is momentarily half-typed is a whole file
+ * flickering grey over one keystroke. Absence of a binding is only evidence
+ * when nothing is missing.
  *
  * A single semantic token may not span a line break, so any run containing a
  * newline (e.g. a multi-line string) is split into one token per line.
@@ -100,6 +111,7 @@ function tryAnalyzeScopes(text: string, fileHandler?: FileHandler): ScopeAnalysi
 export function buildSemanticTokens(doc: TextDocument, fileHandler?: FileHandler): SemanticTokens {
   const text = doc.getText();
   const analysis = tryAnalyzeScopes(text, fileHandler);
+  const trustUndeclared = analysis !== undefined && analysis.errors.length === 0;
   const builder = new SemanticTokensBuilder();
   let offset = 0;
 
@@ -111,7 +123,7 @@ export function buildSemanticTokens(doc: TextDocument, fileHandler?: FileHandler
       const isIdentifier = analysis !== undefined && IDENTIFIER_CLASS.test(segment.class!);
       const hint = isIdentifier ? analysis!.hintAt(offset) : undefined;
 
-      if (hint !== "undeclared") {
+      if (hint !== "undeclared" || !trustUndeclared) {
         const typeId = typeIndex.get(mapping.type)!;
         let modifiers = 0;
         for (const m of mapping.modifiers ?? []) modifiers |= modifierBit.get(m) ?? 0;
@@ -126,7 +138,7 @@ export function buildSemanticTokens(doc: TextDocument, fileHandler?: FileHandler
           lineOffset += linePiece.length + 1; // + 1 for the consumed "\n"
         }
       }
-      // hint === "undeclared": emit nothing, leaving the identifier uncoloured.
+      // A trusted "undeclared" emits nothing, leaving the identifier uncoloured.
     }
 
     offset += runLength;

@@ -18,9 +18,13 @@
 
 import {
   CompileError,
+  ErrorReporter,
   EXPRESSION_TYPES,
   STATEMENT_TYPES,
+  checkSyntax,
+  firstSyntaxError,
   kids,
+  syntaxErrorNodes,
   type SourceRange,
   type SyntaxNode,
 } from "./syntax.ts";
@@ -484,10 +488,32 @@ function rangeOf(node: SyntaxNode): Range {
   return { from: node.from, to: node.to };
 }
 
-/** Reject any parse-error node before conversion drops it on the floor. */
-function checkSyntax(node: SyntaxNode): void {
-  if (node.type === "⚠") fail("Syntax error", node);
-  for (const child of node.children) checkSyntax(child);
+/**
+ * The state a *recovering* conversion carries: where to put the errors it
+ * would otherwise have thrown, and the reporter that gives them a line number.
+ *
+ * Passing one turns every block into a recovery point - a statement that fails
+ * to convert is reported and dropped, and its siblings still convert - which is
+ * what lets the editor features (completion, hover, scope-aware highlighting)
+ * keep working on half-typed source. Its absence is the strict conversion
+ * `compile()` runs, which throws at the first problem.
+ */
+type Recovery = {
+  readonly reporter: ErrorReporter;
+  readonly errors: CompileError[];
+};
+
+/**
+ * A value thrown out of `convertStatement` as a diagnostic. Anything that is
+ * not a `CompileError` is a fault in the conversion rather than in the source -
+ * a shape the strict path would have rejected as a syntax error first - so it
+ * is surfaced as such, anchored on the statement, instead of taking the whole
+ * document's analysis down with it.
+ */
+function asCompileError(thrown: unknown, node: SyntaxNode): CompileError {
+  if (thrown instanceof CompileError) return thrown;
+  const message = thrown instanceof Error ? thrown.message : String(thrown);
+  return new CompileError(`Internal compiler error: ${message}`, node);
 }
 
 // function decodeString(raw: string): string {
@@ -506,6 +532,7 @@ function convertBlock(
   node: SyntaxNode,
   afterKeyword: string | null,
   beforeKeyword: string | null,
+  recovery?: Recovery,
 ): Block {
   const parts = kids(node);
   let start = 0;
@@ -526,8 +553,30 @@ function convertBlock(
     type: "block",
     from: span.length ? span[0].from : anchor,
     to: span.length ? span[span.length - 1].to : anchor,
-    statements: span.map(convertStatement),
+    statements: recovery
+      ? convertStatementsLeniently(span, recovery)
+      : span.map(s => convertStatement(s)),
   };
+}
+
+/**
+ * Convert what converts, and report the rest. A statement the parser already
+ * flagged is *still* attempted - the grammar often recovers well enough that
+ * the shape is intact - but its failure raises nothing, because the syntax
+ * error `getPartialFormalAST` collected up front is the diagnostic for it and
+ * whatever the conversion then trips over is a consequence, not a second
+ * problem.
+ */
+function convertStatementsLeniently(span: SyntaxNode[], recovery: Recovery): Statement[] {
+  const statements: Statement[] = [];
+  for (const part of span) {
+    try {
+      statements.push(convertStatement(part, recovery));
+    } catch (thrown) {
+      if (!firstSyntaxError(part)) recovery.errors.push(asCompileError(thrown, part));
+    }
+  }
+  return statements;
 }
 
 /** The first expression child appearing before `boundary` (or anywhere). */
@@ -746,7 +795,7 @@ export function convertExpression(node: SyntaxNode): Expression {
   }
 }
 
-export function convertStatement(node: SyntaxNode): Statement {
+export function convertStatement(node: SyntaxNode, recovery?: Recovery): Statement {
   const parts = kids(node);
 
   switch (node.type) {
@@ -793,10 +842,10 @@ export function convertStatement(node: SyntaxNode): Statement {
             type: "ifthen",
             ...rangeOf(part),
             condition: convertExpression(conditionOf(part, "then")),
-            then: convertBlock(part, "then", null),
+            then: convertBlock(part, "then", null, recovery),
           });
         } else if (part.type === "Else") {
-          elseBlock = convertBlock(part, "else", null);
+          elseBlock = convertBlock(part, "else", null, recovery);
         }
       }
       if (ifs.length === 0) fail("Malformed if", node);
@@ -804,14 +853,14 @@ export function convertStatement(node: SyntaxNode): Statement {
     }
 
     case "LoopExpr":
-      return { type: "loop", ...rangeOf(node), body: convertBlock(node, "loop", "end") };
+      return { type: "loop", ...rangeOf(node), body: convertBlock(node, "loop", "end", recovery) };
 
     case "WhileExpr":
       return {
         type: "while",
         ...rangeOf(node),
         condition: convertExpression(conditionOf(node, "do")),
-        body: convertBlock(node, "do", "end"),
+        body: convertBlock(node, "do", "end", recovery),
       };
 
     case "RepeatUntilExpr":
@@ -819,7 +868,7 @@ export function convertStatement(node: SyntaxNode): Statement {
         type: "repeat",
         ...rangeOf(node),
         until: convertExpression(expressionAfter(node, "until", "repeat needs a condition")),
-        body: convertBlock(node, "repeat", "until"),
+        body: convertBlock(node, "repeat", "until", recovery),
       };
 
     case "ForExpr": {
@@ -838,10 +887,10 @@ export function convertStatement(node: SyntaxNode): Statement {
       return {
         ...rangeOf(node),
         type: "for",
-        init: init ? convertStatement(init) : undefined,
+        init: init ? convertStatement(init, recovery) : undefined,
         condition: cond ? convertExpression(cond) : undefined,
-        update: updt ? convertStatement(updt) : undefined,
-        body: convertBlock(node, "do", "end"),
+        update: updt ? convertStatement(updt, recovery) : undefined,
+        body: convertBlock(node, "do", "end", recovery),
       }
     }
 
@@ -854,9 +903,9 @@ export function convertStatement(node: SyntaxNode): Statement {
       return {
         ...rangeOf(node),
         type: "forin",
-        decl: convertStatement(decl) as Declaration,
+        decl: convertStatement(decl, recovery) as Declaration,
         list: convertIdentifier(list) as Identifier,
-        body: convertBlock(node, "do", "end"),
+        body: convertBlock(node, "do", "end", recovery),
       }
     }
 
@@ -869,9 +918,9 @@ export function convertStatement(node: SyntaxNode): Statement {
       return {
         ...rangeOf(node),
         type: "forof",
-        decl: convertStatement(decl) as Declaration,
+        decl: convertStatement(decl, recovery) as Declaration,
         list: convertIdentifier(list) as Identifier,
-        body: convertBlock(node, "do", "end"),
+        body: convertBlock(node, "do", "end", recovery),
       }
     }
 
@@ -956,7 +1005,7 @@ export function convertStatement(node: SyntaxNode): Statement {
           .map(convertIdentifier),
         // An empty body produces no FunctionBlock node at all.
         body: bodyNode
-          ? convertBlock(bodyNode, null, null)
+          ? convertBlock(bodyNode, null, null, recovery)
           : { type: "block", from: node.to, to: node.to, statements: [] },
       };
     }
@@ -1020,10 +1069,56 @@ export function convertStatement(node: SyntaxNode): Statement {
 /**
  * Convert a parse tree from `getAST` into the strictly typed form above.
  * `root` is the `program` node; the result is its top-level block.
+ *
+ * Throws at the first problem, which is what a compile wants: there is no
+ * useful assembly to emit past one. Editor features want the opposite - see
+ * `getPartialFormalAST`.
  */
 export function getFormalAST(root: SyntaxNode): Block {
-  checkSyntax(root);
+  checkSyntax(root, new ErrorReporter(root.text));
   return convertBlock(root, null, null);
+}
+
+/**
+ * Convert as much of the tree as converts, and report everything wrong with
+ * the rest, in source order.
+ *
+ * Two kinds of problem end up in `errors`. Parse-error nodes are collected up
+ * front, one per broken line, because they are the parser's own verdict and
+ * are the same whether or not the statement around them survives conversion -
+ * and it often does, since Lezer's recovery patches in the node the grammar
+ * expected, so a broken `let` still yields a `Declaration` (with an empty
+ * name) rather than nothing at all. Conversion failures are then caught per
+ * statement, so a statement the conversion cannot make sense of costs itself
+ * and nothing else - crucially, a statement inside a function or a loop body,
+ * since every block is a recovery point.
+ *
+ * The returned block is therefore *missing* whatever failed, and is only fit
+ * for analyses that tolerate that (scope resolution for completion, hover and
+ * highlighting). Lowering it would report problems the source does not have,
+ * so `diagnose` in index.ts stops here when `errors` is non-empty.
+ */
+export function getPartialFormalAST(
+  root: SyntaxNode,
+  reporter: ErrorReporter,
+): { block: Block; errors: CompileError[] } {
+  // One syntax error per line. The parser's recovery routinely marks a single
+  // mistake twice - `let = 2` yields a zero-width error where the name should
+  // be *and* one over the `=` it could not attach - and both carry the same
+  // message, so the second is a duplicate underline that says nothing the
+  // first did not.
+  const reportedLines = new Set<number>();
+  const errors: CompileError[] = [];
+  for (const node of syntaxErrorNodes(root)) {
+    const line = reporter.lineOf(node);
+    if (reportedLines.has(line)) continue;
+    reportedLines.add(line);
+    errors.push(reporter.error("Syntax error", node));
+  }
+
+  const block = convertBlock(root, null, null, { reporter, errors });
+  errors.sort((a, b) => a.from - b.from);
+  return { block, errors };
 }
 
 /**

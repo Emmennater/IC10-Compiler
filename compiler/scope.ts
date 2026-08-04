@@ -23,7 +23,8 @@
 
 import type { SyntaxNode } from "./ast.ts";
 import { getAST } from "./ast.ts";
-import { getFormalAST } from "./formal-ast.ts";
+import { getFormalAST, getPartialFormalAST } from "./formal-ast.ts";
+import { CompileError, ErrorReporter } from "./syntax.ts";
 import { modulePath, type FileHandler } from "./modules.ts";
 import type {
   Block,
@@ -73,6 +74,13 @@ export type Sym = {
 export type Occurrence = { range: Range; name: string; symbol: Sym | null };
 
 export type ScopeAnalysis = {
+  /**
+   * What is wrong with the source, in source order. Non-empty means whole
+   * statements are missing from the tree that was analyzed, so an absent
+   * binding may be a casualty of that rather than a name the program never
+   * declared - `undeclared` hints are not trustworthy while it is.
+   */
+  errors: CompileError[];
   /** The highlight hint for the identifier that starts at `from`, if any. */
   hintAt(from: number): HighlightHint | undefined;
   /** The names visible at a source offset, innermost shadowing outermost. */
@@ -157,13 +165,14 @@ function moduleExport(
 }
 
 /**
- * Analyze the program's scopes. Throws whatever `getFormalAST` throws on a
- * syntax error in the *main* file, so callers doing best-effort work on
- * half-typed source should catch and fall back. (Errors in imported modules are
- * swallowed; that import just stays unresolved.)
+ * Analyze the program's scopes. Half-typed source is the normal case for every
+ * caller of this - the editor re-runs it on each keystroke - so it converts
+ * leniently: whatever fails to parse is reported in `errors` and dropped, and
+ * the names around it still resolve. (Errors in imported modules are swallowed
+ * separately; that import just stays unresolved.)
  */
 export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): ScopeAnalysis {
-  const module = getFormalAST(ast);
+  const { block: module, errors } = getPartialFormalAST(ast, new ErrorReporter(ast.text));
   // The root node's text is the whole file; `ast.from` is where it starts, so
   // absolute node offsets map into it as `offset - ast.from`.
   const source = ast.text;
@@ -428,6 +437,7 @@ export function analyzeScopes(ast: SyntaxNode, fileHandler?: FileHandler): Scope
   }
 
   return {
+    errors,
     hintAt: (from) => hints.get(from),
     occurrenceAt: (offset) => occurrences.find((o) => offset >= o.range.from && offset <= o.range.to),
     occurrencesOf: (symbol) => occurrences.filter((o) => o.symbol === symbol),
