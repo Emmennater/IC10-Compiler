@@ -64,6 +64,13 @@ AST shape (e.g. reproducing one of the seven documented bugs below).
 strings through `getAST` → `getFormalAST`, asserting the typed tree's shape.
 It touches no part of the compile pipeline.
 
+`tests\diagnostics.test.ts` (18 cases) covers the *recovery* path — `diagnose`,
+`getPartialFormalAST`, and the editor analyses over a program that does not
+compile (see *Errors* below). It asserts how many errors come back and that
+scope resolution survives them; the wording of any one diagnostic belongs to
+`tests\test.mjs`, and one case pins the thing that ties the two together —
+`diagnose`'s first error is the error `compile` throws.
+
 `tests\docs.test.mjs` is a fifth layer, over the *documentation*: every
 `` ```icc `` fence in `docs.markdoc.md` tagged `compile` or `error` is a claim
 about the compiler, and this runs each one through `runDocExample` in
@@ -331,6 +338,65 @@ markers in the since-deleted patched original).
     evaluation above the loop, which changes how often a device is sampled
     for every existing program, so it is left alone deliberately.
 
+## Errors: one for `compile`, all of them for `diagnose`
+
+A compile stops at the first error, because there is no useful assembly past
+it. An editor wants the opposite — every underline at once, and the file's
+names still resolving while a line is half-typed. Those are two different
+questions, so they are two entry points over one pipeline:
+
+- **`compile`** throws the first `CompileError`. Unchanged, and deliberately
+  so: it is what the 43 differential cases and every `error:` case in
+  `tests\test.mjs` pin. It runs `checkSyntax` → `getFormalAST` → `Lowerer.lower`
+  → `backEnd`, none of which recover.
+- **`diagnose`** returns `CompileError[]` in source order — empty means
+  `compile` would succeed, and `errors[0]` is exactly what `compile` throws.
+
+**Recovery costs precision, so it is allowed only where it is honest**, and how
+many errors come back depends on how early they are:
+
+- `getPartialFormalAST` (formal-ast.ts) reports **per statement**, so five
+  malformed lines are five errors. Every block is a recovery point, which is
+  what makes a broken line inside a `fn` cost that line rather than the
+  function. Parse-error (`⚠`) nodes are collected up front, **one per line** —
+  the parser routinely marks one mistake twice with the same message, and a
+  second identical underline says nothing. A statement is still *attempted*
+  after its line is flagged, because Lezer patches in the node the grammar
+  wanted, so a broken `let` yields a `Declaration` with an empty name rather
+  than nothing; whatever the conversion then trips over is suppressed, being a
+  consequence of the syntax error rather than a second problem.
+- **Nothing is lowered when there are any of those.** The tree is missing
+  statements, so lowering it would invent problems the source does not have.
+- `Lowerer.lower(fileHandler, collect)` reports **per top-level statement**.
+  A statement that fails is abandoned where it stood and the next one lowers
+  against whatever it had already declared, so errors past the first are
+  plausible rather than guaranteed — the right trade for underlining lines,
+  and the reason the program from a collecting run is thrown away rather than
+  emitted. The pre-passes (`registerFunctions`, `registerImports`) still throw:
+  an unresolvable `import` makes every later diagnostic a consequence of
+  itself.
+- **Register allocation reports one**, and only when lowering was clean. It
+  sees the whole program at once, so there is no statement to recover to.
+- A non-`CompileError` is a fault in the compiler, not in the source, and is
+  never recovered from — it propagates out of `diagnose` too.
+
+**The editor analyses ride on the same recovery.** `analyzeScopes` converts
+leniently and exposes `errors` alongside the resolution results, which is what
+keeps completion, hover, go-to-definition and rename working on the source an
+editor actually sees — a file mid-keystroke. Two consequences worth keeping:
+
+- **`getCompletions` no longer degrades to keywords.** The statement being
+  typed is the one missing from the tree, and it is the one place a completion
+  is not being asked *about*; every other name in the file still resolves.
+- **`undeclared` is only evidence when nothing is missing.** Highlighting
+  suppresses an identifier's token when it resolves to nothing, so
+  `buildSemanticTokens` checks `analysis.errors.length === 0` before trusting
+  that hint — otherwise a half-typed `let` would blank every use of the name
+  it declares, greying out a whole file over one keystroke. `readonly` needs no
+  such guard and applies either way, and the *lexical* colouring never depended
+  on validity at all: Lezer recovers on its own, so `highlightSegments` colours
+  a broken file like any other.
+
 ## Architecture: frames
 
 Phase 1 (lowering) is built from **frames**. `FrameContext` is an immutable
@@ -379,10 +445,15 @@ modeling the program being compiled.
   call's *name* is deliberately not a child, so a walk hunting name
   references cannot mistake a callee for a value).
 - `syntax.ts` — `ErrorReporter`, `SourceRange`, and the little raw-tree
-  handling left (`kids`, `checkSyntax`, the node-type sets `formal-ast.ts`
-  uses). The navigation helpers that used to live here (`blockOf`,
-  `conditionOf`, `statementsIn`) moved into `formal-ast.ts` with the job of
-  interpreting the concrete tree.
+  handling left (`kids`, the parse-error searches, the node-type sets
+  `formal-ast.ts` uses). The navigation helpers that used to live here
+  (`blockOf`, `conditionOf`, `statementsIn`) moved into `formal-ast.ts` with
+  the job of interpreting the concrete tree. The three `⚠` searches are one
+  traversal each and split by what the caller does with the answer:
+  `checkSyntax` throws the first (for `compile`), `syntaxErrorNodes` returns
+  them all (for the recovering conversion), and `firstSyntaxError` just asks
+  whether a subtree has one — which is how recovery tells a real conversion
+  failure from the fallout of a syntax error it already reported.
 - `tables.ts` — opcode tables plus the single shared implementation of IC10
   arithmetic/bitwise/comparison semantics; folding, constexpr, and codegen
   all call these, so fold-time and run-time semantics cannot drift (that
@@ -603,10 +674,20 @@ per lexical frame), `liveness.ts`, `optimize.ts`, `regalloc.ts`,
   `x + y` ends a chain. And it never scans across a label, jump, branch,
   jal, or ret, so a chain split by control flow keeps both links. Every
   limit costs an instruction and none can miscompile.
-- `checkSyntax` runs twice on the raw tree: `compile()` calls the reporting
-  one (so "Syntax error" carries a line number), then `getFormalAST` re-checks
-  because it has no reporter. Cheap, and it keeps `getFormalAST` usable on
-  its own.
+- `checkSyntax` runs twice on the raw tree: `compile()` calls it, then
+  `getFormalAST` re-checks with a reporter it builds from `root.text`. Cheap,
+  and it keeps `getFormalAST` usable on its own.
+- `diagnose` reports lowering errors per *top-level* statement only. A failed
+  statement nested in an `if` or a `fn` still aborts the top-level statement
+  containing it, so a body with three bad lines reports one. Recovering finer
+  means giving `FrameLowerer` a resumption point inside a block, and a frame
+  abandoned mid-statement has emitted instructions and possibly demoted
+  variables that the rest of its block would then lower against — errors from
+  which would be the recovery's, not the source's.
+- A conversion error (`formal-ast.ts`'s `fail`) carries no line prefix where
+  every other diagnostic does, since `fail` predates the reporter and building
+  one there would change what `compile` throws. The range is right either way,
+  so the editor is unaffected; only the web editor's text output shows it.
 - Nothing tells an importing program that its module changed. The addresses
   it baked in are only right while the module's `stack`, list and `const`
   declarations stay as they were, so inserting a `stack` line at the top of a

@@ -23,7 +23,7 @@
  * frame was never modified - the JavaScript call stack is the only stack.
  */
 
-import { ErrorReporter } from "./syntax.ts";
+import { CompileError, ErrorReporter } from "./syntax.ts";
 import {
   childrenOf,
   type ArithmeticOpcode, type ArrayDeclaration as ListDeclaration, type ListIndexing,
@@ -189,8 +189,23 @@ export class Lowerer {
     };
   }
 
-  /** Lower the whole tree and assemble headers, functions, and main code. */
-  lower(fileHandler: FileHandler): LoweredProgram {
+  /**
+   * Lower the whole tree and assemble headers, functions, and main code.
+   *
+   * `collect` turns the top-level statement loop into a recovery point: a
+   * statement whose lowering raises a diagnostic is abandoned and the next one
+   * is lowered anyway, so one pass reports every top-level statement that is
+   * wrong instead of just the first (`diagnose` in index.ts). The program that
+   * comes back is then meaningless - it is missing whatever was abandoned, and
+   * whatever an abandoned statement had already emitted is still in the buffer
+   * - so a collecting caller reads the errors and throws the program away.
+   *
+   * Recovery stops at the statement boundary and no finer. The pre-passes
+   * below run first and still throw, since an unresolvable `import` or a
+   * duplicate `fn` would make every diagnostic after it a consequence of
+   * itself rather than a problem of its own.
+   */
+  lower(fileHandler: FileHandler, collect: CompileError[] | null = null): LoweredProgram {
     // Functions first, so an import colliding with one is caught as such.
     this.registerFunctions();
     const globals = ScopeChain.root();
@@ -211,7 +226,19 @@ export class Lowerer {
       selfDevice: SELF_DEVICE,
     });
     for (const statement of this.ast.statements) {
-      root.processStatement(statement);
+      if (!collect) {
+        root.processStatement(statement);
+        continue;
+      }
+      try {
+        root.processStatement(statement);
+      } catch (thrown) {
+        // A CompileError is the source's problem and the next statement may
+        // have its own; anything else is a fault in the compiler, which no
+        // amount of recovery makes safe to continue past.
+        if (!(thrown instanceof CompileError)) throw thrown;
+        collect.push(thrown);
+      }
     }
 
     return {

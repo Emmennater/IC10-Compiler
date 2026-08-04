@@ -37,8 +37,13 @@ const KEYWORD_COMPLETIONS: Completion[] = KEYWORDS.map((label) => ({ label, kind
 
 /**
  * Completions offered at `offset`: the names in scope there, then the keywords.
- * On unparseable source (common mid-edit) the scope pass throws, and we fall
- * back to keywords alone rather than offering nothing.
+ *
+ * Half-typed source is the normal case here -- asking for completions is
+ * usually what *makes* the line invalid -- so the scope pass converts leniently
+ * and the names declared elsewhere in the file still come back. Only the
+ * statement being typed is missing from the tree it walked, and that statement
+ * is the one place a completion is not being asked about. The catch is for a
+ * fault in the analysis itself: keywords alone beats offering nothing.
  */
 export function getCompletions(
   ast: SyntaxNode,

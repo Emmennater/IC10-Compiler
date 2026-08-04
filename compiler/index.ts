@@ -22,11 +22,11 @@
  *   r16 (sp) and r17 (ra) are reserved for stack and function support.
  */
 
-import { checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
-import { getFormalAST } from "./formal-ast.ts";
+import { CompileError, checkSyntax, ErrorReporter, type SyntaxNode } from "./syntax.ts";
+import { getFormalAST, getPartialFormalAST } from "./formal-ast.ts";
 import { IdAllocator } from "./ir.ts";
 import { RESERVED_REGISTER_BASE, VAR_REGISTER_ORDER } from "./tables.ts";
-import { INLINE_THRESHOLD, Lowerer, type FileHandler } from "./lowering.ts";
+import { INLINE_THRESHOLD, Lowerer, type FileHandler, type LoweredProgram } from "./lowering.ts";
 import { optimize } from "./optimize.ts";
 import { allocateRegisters } from "./regalloc.ts";
 import { renderProgram, resolveLabels } from "./render.ts";
@@ -81,6 +81,34 @@ function validateConfig(registerOrder: readonly number[], inlineThreshold: numbe
   }
 }
 
+/** The config a compile actually runs with, defaults filled in and checked. */
+function resolveConfig(config: Partial<Config>): Config {
+  const settings: Config = {
+    removeLabels: config.removeLabels ?? DEFAULT_CONFIG.removeLabels,
+    registerOrder: config.registerOrder ?? DEFAULT_CONFIG.registerOrder,
+    inlineThreshold: config.inlineThreshold ?? DEFAULT_CONFIG.inlineThreshold,
+  };
+  validateConfig(settings.registerOrder, settings.inlineThreshold);
+  return settings;
+}
+
+/** Phases 2 and 3: everything downstream of a fully lowered program. */
+function backEnd(
+  lowered: LoweredProgram,
+  ast: SyntaxNode,
+  errors: ErrorReporter,
+  ids: IdAllocator,
+  settings: Config,
+): string {
+  const { program, ifRegions, loopRegions } = lowered;
+  const optimized = optimize(program, ifRegions, loopRegions);
+  const { program: allocated, registerOf } = allocateRegisters(
+    optimized, { registerOrder: settings.registerOrder, ids, errors, rootNode: ast });
+
+  const output = renderProgram(allocated, registerOf);
+  return settings.removeLabels ? resolveLabels(output) : output;
+}
+
 /**
  * Compile a parsed program to IC10 assembly text.
  * @param ast The programs AST
@@ -92,23 +120,59 @@ export function compile(
   config: Partial<Config> = {},
   fileHandler: FileHandler = () => undefined,
 ): string {
-  const removeLabels = config.removeLabels ?? DEFAULT_CONFIG.removeLabels;
-  const registerOrder = config.registerOrder ?? DEFAULT_CONFIG.registerOrder;
-  const inlineThreshold = config.inlineThreshold ?? DEFAULT_CONFIG.inlineThreshold;
-  validateConfig(registerOrder, inlineThreshold);
-
+  const settings = resolveConfig(config);
   const errors = new ErrorReporter(ast.text);
-  // Reported here rather than left to getFormalAST so the message carries a
-  // source line, as every other diagnostic does.
+  // Checked here rather than left to getFormalAST so the whole compile shares
+  // one reporter; getFormalAST builds its own to stay usable on its own.
   checkSyntax(ast, errors);
 
   const ids = new IdAllocator();
-  const { program, ifRegions, loopRegions } =
-    new Lowerer(getFormalAST(ast), errors, ids, inlineThreshold).lower(fileHandler);
-  const optimized = optimize(program, ifRegions, loopRegions);
-  const { program: allocated, registerOf } =
-    allocateRegisters(optimized, { registerOrder, ids, errors, rootNode: ast });
+  const lowered =
+    new Lowerer(getFormalAST(ast), errors, ids, settings.inlineThreshold).lower(fileHandler);
+  return backEnd(lowered, ast, errors, ids, settings);
+}
 
-  const output = renderProgram(allocated, registerOf);
-  return removeLabels ? resolveLabels(output) : output;
+/**
+ * Everything wrong with a program, in source order, instead of only the first
+ * thing `compile` trips over. An empty array means `compile` would succeed.
+ *
+ * How many errors come back depends on how early they are, because recovery
+ * costs precision:
+ *
+ * - **Parse and shape errors** are collected per statement (`getPartialFormalAST`),
+ *   so a file with five malformed lines reports five. Nothing is lowered when
+ *   there are any: the tree is missing those statements, and lowering it would
+ *   invent problems the source does not have.
+ * - **Lowering errors** are collected per *top-level* statement. A statement
+ *   that fails is abandoned where it stood, and the ones after it still lower
+ *   against whatever it had already declared, so the errors past the first are
+ *   plausible rather than guaranteed - which is the right trade for an editor
+ *   underlining lines, and the reason nothing is emitted from that run.
+ * - **Register allocation** reports one error, and only when lowering was
+ *   clean. It sees the whole program at once, so there is no statement to
+ *   recover to.
+ */
+export function diagnose(
+  ast: SyntaxNode,
+  config: Partial<Config> = {},
+  fileHandler: FileHandler = () => undefined,
+): CompileError[] {
+  const settings = resolveConfig(config);
+  const errors = new ErrorReporter(ast.text);
+  const { block, errors: parseErrors } = getPartialFormalAST(ast, errors);
+  if (parseErrors.length > 0) return parseErrors;
+
+  const collected: CompileError[] = [];
+  try {
+    const ids = new IdAllocator();
+    const lowered =
+      new Lowerer(block, errors, ids, settings.inlineThreshold).lower(fileHandler, collected);
+    // A recovered lowering skipped whatever failed, so the program it produced
+    // is not this source's; only its diagnostics are worth anything.
+    if (collected.length === 0) backEnd(lowered, ast, errors, ids, settings);
+  } catch (thrown) {
+    if (!(thrown instanceof CompileError)) throw thrown;
+    collected.push(thrown);
+  }
+  return collected;
 }
